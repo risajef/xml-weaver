@@ -643,6 +643,36 @@ function openDetectedDocument(fileName: string, text: string): void {
   setNotice(`Opened "${fileName}".`);
 }
 
+function sanitizeSuggestedName(name: string, fallback: string): string {
+  const sanitized = name.trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, "-");
+  return sanitized || fallback;
+}
+
+function inferPastedDocumentName(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return "document.xml";
+  }
+
+  if (trimmed.startsWith("{")) {
+    try {
+      const loaded = importDraftDocument<DraftDocumentPayload>(trimmed);
+      const title = loaded.title ? sanitizeSuggestedName(loaded.title, "document") : "document";
+      return title.endsWith(".json") ? title : `${title}.draft.json`;
+    } catch {
+      return "document.json";
+    }
+  }
+
+  try {
+    const parsed = parseXmlString(trimmed);
+    const rootName = sanitizeSuggestedName(localName(parsed.root.name) || "document", "document");
+    return localName(parsed.root.name) === "schema" ? `${rootName}.xsd` : `${rootName}.xml`;
+  } catch {
+    return "document.xml";
+  }
+}
+
 function loadDemoWorkspace(): void {
   for (const source of DEMO_FILES) {
     if (source.kind === "xsd") {
@@ -1228,6 +1258,11 @@ function createNewDocument(): void {
         detail: "Create a new editable XSD document.",
         value: "xsd-schema",
       },
+      {
+        label: "Paste XML / XSD / draft",
+        detail: "Paste source text and let the app detect what it is.",
+        value: "paste-source",
+      },
     ],
     onSelect: (option) => {
       const choice = typeof option === "string" ? option : option.value || "";
@@ -1241,6 +1276,10 @@ function createNewDocument(): void {
       }
       if (choice === "xsd-schema") {
         createNewSchemaDocument();
+        return;
+      }
+      if (choice === "paste-source") {
+        createPastedDocument();
       }
     },
   });
@@ -1324,6 +1363,22 @@ function createNewSchemaDocument(): void {
   }
   addDocument(documentState);
   setNotice('Created new schema "schema.xsd".');
+}
+
+function createPastedDocument(): void {
+  openInputPalette("Paste XML, XSD, or draft", "", (value) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+    const fileName = inferPastedDocumentName(trimmed);
+    openDetectedDocument(fileName, trimmed);
+  }, {
+    multiline: true,
+    placeholder: "Paste XML, XSD, or draft JSON here",
+    submitLabel: "Open pasted source",
+    subtitle: "The app will detect whether the pasted content is XML, XSD, or a draft.",
+  });
 }
 
 function downloadFile(fileName: string, content: string, type: string): void {
