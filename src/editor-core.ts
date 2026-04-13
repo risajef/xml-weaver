@@ -1502,6 +1502,10 @@ export function serializeXml(root: ElementNode, schema: SchemaModel | null): str
     throw new Error("Cannot export while placeholders or schema errors remain.");
   }
 
+  return renderSourceXml(root);
+}
+
+export function renderSourceXml(root: ElementNode): string {
   return `<?xml version="1.0" encoding="UTF-8"?>\n${XML_OUTPUT.build({ [root.name]: toSerializableNode(root) })}`;
 }
 
@@ -1517,16 +1521,16 @@ export function flattenVisibleItems(root: ElementNode): VisibleTreeItem[] {
   const items: VisibleTreeItem[] = [];
   const visit = (node: ElementNode, depth: number): void => {
     items.push({ id: node.id, type: VisibleItemType.Node, depth, nodeId: node.id });
-    if (node.collapsed) {
-      return;
-    }
-
     for (const attribute of node.attributes) {
       items.push({ id: attribute.id, type: VisibleItemType.Attribute, depth: depth + 1, nodeId: node.id, attributeId: attribute.id });
     }
 
     if (node.text || node.textPlaceholder) {
       items.push({ id: `text:${node.id}`, type: VisibleItemType.Text, depth: depth + 1, nodeId: node.id });
+    }
+
+    if (node.collapsed) {
+      return;
     }
 
     for (const child of node.children) {

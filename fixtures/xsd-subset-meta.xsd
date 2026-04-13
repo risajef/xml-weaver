@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <simpleType name="useType">
+    <restriction base="string">
+      <enumeration value="required" />
+      <enumeration value="optional" />
+    </restriction>
+  </simpleType>
+  <complexType name="enumerationType">
+    <attribute name="value" type="string" use="required" />
+  </complexType>
+  <complexType name="restrictionType">
+    <choice minOccurs="0" maxOccurs="unbounded">
+      <element name="enumeration" type="enumerationType" />
+    </choice>
+    <attribute name="base" type="string" use="required" />
+  </complexType>
+  <complexType name="simpleTypeType">
+    <sequence>
+      <element name="restriction" type="restrictionType" />
+    </sequence>
+    <attribute name="name" type="string" use="optional" />
+  </complexType>
+  <complexType name="attributeType">
+    <choice minOccurs="0" maxOccurs="1">
+      <element name="simpleType" type="simpleTypeType" />
+    </choice>
+    <attribute name="name" type="string" use="optional" />
+    <attribute name="ref" type="string" use="optional" />
+    <attribute name="type" type="string" use="optional" />
+    <attribute name="use" type="useType" use="optional" />
+  </complexType>
+  <complexType name="particleGroupType">
+    <choice minOccurs="0" maxOccurs="unbounded">
+      <element name="element" type="elementType" />
+      <element name="sequence" type="sequenceType" />
+      <element name="choice" type="choiceType" />
+    </choice>
+    <attribute name="minOccurs" type="string" use="optional" />
+    <attribute name="maxOccurs" type="string" use="optional" />
+  </complexType>
+  <complexType name="sequenceType">
+    <choice minOccurs="0" maxOccurs="unbounded">
+      <element name="element" type="elementType" />
+      <element name="sequence" type="sequenceType" />
+      <element name="choice" type="choiceType" />
+    </choice>
+    <attribute name="minOccurs" type="string" use="optional" />
+    <attribute name="maxOccurs" type="string" use="optional" />
+  </complexType>
+  <complexType name="choiceType">
+    <choice minOccurs="0" maxOccurs="unbounded">
+      <element name="element" type="elementType" />
+      <element name="sequence" type="sequenceType" />
+      <element name="choice" type="choiceType" />
+    </choice>
+    <attribute name="minOccurs" type="string" use="optional" />
+    <attribute name="maxOccurs" type="string" use="optional" />
+  </complexType>
+  <complexType name="extensionType">
+    <choice minOccurs="0" maxOccurs="unbounded">
+      <element name="attribute" type="attributeType" />
+    </choice>
+    <attribute name="base" type="string" use="required" />
+  </complexType>
+  <complexType name="simpleContentType">
+    <choice minOccurs="1" maxOccurs="1">
+      <element name="extension" type="extensionType" />
+      <element name="restriction" type="restrictionType" />
+    </choice>
+  </complexType>
+  <complexType name="complexTypeType">
+    <sequence>
+      <choice minOccurs="0" maxOccurs="1">
+        <element name="sequence" type="sequenceType" />
+        <element name="choice" type="choiceType" />
+        <element name="simpleContent" type="simpleContentType" />
+      </choice>
+      <element name="attribute" type="attributeType" minOccurs="0" maxOccurs="unbounded" />
+    </sequence>
+    <attribute name="name" type="string" use="optional" />
+  </complexType>
+  <complexType name="elementType">
+    <choice minOccurs="0" maxOccurs="1">
+      <element name="complexType" type="complexTypeType" />
+      <element name="simpleType" type="simpleTypeType" />
+    </choice>
+    <attribute name="name" type="string" use="optional" />
+    <attribute name="ref" type="string" use="optional" />
+    <attribute name="type" type="string" use="optional" />
+    <attribute name="minOccurs" type="string" use="optional" />
+    <attribute name="maxOccurs" type="string" use="optional" />
+  </complexType>
+  <complexType name="schemaType">
+    <choice minOccurs="0" maxOccurs="unbounded">
+      <element name="simpleType" type="simpleTypeType" />
+      <element name="complexType" type="complexTypeType" />
+      <element name="element" type="elementType" />
+    </choice>
+  </complexType>
+  <element name="schema" type="schemaType" />
+</schema>

@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<library xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:noNamespaceSchemaLocation="library.xsd"
-         region="eu">
+<library xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="library.xsd" region="eu">
   <book format="hardcover">
     <title>Schema Guided Editing</title>
     <author>Ada Lovelace</author>

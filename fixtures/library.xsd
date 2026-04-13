@@ -15,7 +15,7 @@
   <xs:complexType name="bookType">
     <xs:sequence>
       <xs:element name="title" type="xs:string" />
-      <xs:choice minOccurs="1">
+      <xs:choice minOccurs="1" maxOccurs="unbounded">
         <xs:element name="author" type="xs:string" />
         <xs:element name="editor" type="xs:string" />
       </xs:choice>
