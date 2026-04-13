@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="priorityType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="low" />
+      <xs:enumeration value="high" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="noteType">
+    <xs:sequence>
+      <xs:element name="to" type="xs:string" />
+      <xs:element name="from" type="xs:string" />
+      <xs:element name="body" type="xs:string" />
+    </xs:sequence>
+    <xs:attribute name="priority" type="priorityType" use="required" />
+  </xs:complexType>
+  <xs:element name="note" type="noteType" />
+</xs:schema>

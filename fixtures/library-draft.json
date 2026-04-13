@@ -1,0 +1,83 @@
+{
+  "title": "library-draft.json",
+  "kind": "xml",
+  "root": {
+    "id": "node-demo-library",
+    "name": "library",
+    "attributes": [
+      {
+        "id": "attr-demo-region",
+        "name": "region",
+        "value": "eu",
+        "placeholder": false,
+        "expectedValues": [
+          "eu",
+          "us"
+        ]
+      }
+    ],
+    "children": [
+      {
+        "id": "node-demo-book",
+        "name": "book",
+        "attributes": [
+          {
+            "id": "attr-demo-format",
+            "name": "format",
+            "value": "",
+            "placeholder": true,
+            "expectedValues": [
+              "hardcover",
+              "paperback"
+            ]
+          }
+        ],
+        "children": [
+          {
+            "id": "node-demo-title",
+            "name": "title",
+            "attributes": [],
+            "children": [],
+            "text": "Draft book title",
+            "textPlaceholder": false,
+            "collapsed": false,
+            "placeholder": false,
+            "allowedNames": []
+          },
+          {
+            "id": "node-demo-choice",
+            "name": "placeholder",
+            "attributes": [],
+            "children": [],
+            "text": "",
+            "textPlaceholder": false,
+            "collapsed": false,
+            "placeholder": true,
+            "allowedNames": [
+              "author",
+              "editor"
+            ]
+          }
+        ],
+        "text": "",
+        "textPlaceholder": false,
+        "collapsed": false,
+        "placeholder": false,
+        "allowedNames": []
+      }
+    ],
+    "text": "",
+    "textPlaceholder": false,
+    "collapsed": false,
+    "placeholder": false,
+    "allowedNames": []
+  },
+  "schemaId": null,
+  "schemaReferences": [
+    "library.xsd"
+  ],
+  "mode": "edit",
+  "selectedId": "node-demo-choice",
+  "allowAutoLeaveMigration": true,
+  "schemaRegistrationId": null
+}

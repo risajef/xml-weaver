@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="regionType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="eu" />
+      <xs:enumeration value="us" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="formatType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="hardcover" />
+      <xs:enumeration value="paperback" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="bookType">
+    <xs:sequence>
+      <xs:element name="title" type="xs:string" />
+      <xs:choice minOccurs="1">
+        <xs:element name="author" type="xs:string" />
+        <xs:element name="editor" type="xs:string" />
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="format" type="formatType" use="required" />
+  </xs:complexType>
+  <xs:complexType name="libraryType">
+    <xs:sequence>
+      <xs:element name="book" type="bookType" minOccurs="1" maxOccurs="unbounded" />
+    </xs:sequence>
+    <xs:attribute name="region" type="regionType" use="required" />
+  </xs:complexType>
+  <xs:element name="library" type="libraryType" />
+</xs:schema>

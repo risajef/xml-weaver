@@ -1,4 +1,4 @@
-### This is a smart xml editor. 
+# This is a smart xml editor.
 
 Given a xml file and a xml schema it allows for fast correct edits of the xml file. It renders the xml without useless information. No Less-than sign: <, no Greater-than sign: >, no double quotes: ", no equal signs. It should visually display the hierarchical nature of the information (by nested boxes). The editor should be a keyboard first editor. So you have a cursor/selection to navigate.
 
@@ -36,3 +36,11 @@ The editor allows to open xml schemas referenced at the top of the xml file. Is 
 Therefore the editor should also have a "migration mode". In this mode it is "okay" to have non-valid xml files. The editor guides to the elements that invalidate it and you can rename the node or delete it. On rename it will not remove all inside nodes (unlike the replace action on nodes in the normal edit mode). It will just highlight the next problem and guide you there. Storing files that have not fully been migrated is okay, the will have a file ending that shows it is in a migration.
 
 When opening an xml file it validates it first and if it is not valid goes automatically in migration mode.
+
+## Dev methodology
+
+Use strict types. Typescript if using javascript. MyPy if using python. Don't compare strings unless parsing. Use enum types and compare them.
+
+Add unit tests for every stateless function.
+
+Add testing xml files and schemas for testing as well as demo for me.
