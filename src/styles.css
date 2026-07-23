@@ -1,36 +1,36 @@
 :root {
-  color-scheme: dark;
-  font-family: Inter, "Segoe UI", sans-serif;
+  color-scheme: light;
+  font-family: 'Inter', Arial, Helvetica, sans-serif;
   font-size: 14px;
-  color: #e2e8f0;
-  background: #0f172a;
-  --color-text: #e2e8f0;
-  --color-text-muted: #94a3b8;
-  --color-text-soft: #cbd5e1;
-  --color-text-accent: #93c5fd;
-  --color-text-accent-strong: #bfdbfe;
-  --color-border: #334155;
-  --color-border-subtle: #1e293b;
-  --color-border-selected: #38bdf8;
-  --color-border-warning: #f59e0b;
-  --color-border-migration: #a78bfa;
-  --color-surface-body: #020617;
-  --color-surface-base: #0f172a;
-  --color-surface-active: #111827;
-  --color-surface-overlay: rgba(15, 23, 42, 0.8);
-  --color-surface-panel: rgba(15, 23, 42, 0.88);
-  --color-surface-tab: rgba(15, 23, 42, 0.5);
-  --color-surface-pill: rgba(30, 41, 59, 0.85);
-  --color-surface-chip: rgba(30, 41, 59, 0.75);
-  --color-surface-attribute: rgba(8, 47, 73, 0.6);
-  --color-surface-meta: rgba(2, 6, 23, 0.55);
-  --color-surface-placeholder: rgba(245, 158, 11, 0.06);
-  --color-surface-selected: rgba(56, 189, 248, 0.09);
-  --color-backdrop: rgba(2, 6, 23, 0.66);
-  --color-connector: rgba(148, 163, 184, 0.28);
-  --color-connector-strong: rgba(148, 163, 184, 0.35);
-  --color-danger-text: #fde68a;
-  --color-migration-text: #ddd6fe;
+  color: #1A1A1A;
+  background: #FFFFFF;
+  --color-text: #1A1A1A;
+  --color-text-muted: #555555;
+  --color-text-soft: #444444;
+  --color-text-accent: #8B0000;
+  --color-text-accent-strong: #A11212;
+  --color-border: #888888;
+  --color-border-subtle: #E0E0E0;
+  --color-border-selected: #8B0000;
+  --color-border-warning: #E68A00;
+  --color-border-migration: #7C3AED;
+  --color-surface-body: #FFFFFF;
+  --color-surface-base: #FFFFFF;
+  --color-surface-active: #F7F7F7;
+  --color-surface-overlay: rgba(255, 255, 255, 0.95);
+  --color-surface-panel: #FFFFFF;
+  --color-surface-tab: #F7F7F7;
+  --color-surface-pill: #F7F7F7;
+  --color-surface-chip: #F7F7F7;
+  --color-surface-attribute: #F0F4F8;
+  --color-surface-meta: #F7F7F7;
+  --color-surface-placeholder: rgba(230, 138, 0, 0.1);
+  --color-surface-selected: rgba(139, 0, 0, 0.08);
+  --color-backdrop: rgba(0, 0, 0, 0.4);
+  --color-connector: rgba(136, 136, 136, 0.4);
+  --color-connector-strong: rgba(139, 0, 0, 0.6);
+  --color-danger-text: #B22222;
+  --color-migration-text: #4C1D95;
   --radius-none: 0;
   --space-0: 0;
   --space-1: 0.05rem;
@@ -48,7 +48,21 @@
   --font-size-ui: 1rem;
   --font-size-small: 0.8rem;
   --font-size-label: 0.75rem;
-  --panel-blur: blur(18px);
+}
+
+* {
+  border-radius: 2px !important;
+}
+
+body {
+  background-color: #FFFFFF !important;
+  color: #1A1A1A !important;
+  font-family: 'Inter', Arial, Helvetica, sans-serif !important;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Gidole', 'Inter', Arial, Helvetica, sans-serif !important;
+  color: #8B0000 !important;
 }
 
 * {
@@ -58,9 +72,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at top, rgba(56, 189, 248, 0.12), transparent 30%),
-    var(--color-surface-body);
+  background: #FFFFFF !important;
 }
 
 button,
