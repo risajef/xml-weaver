@@ -14,7 +14,9 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 | 8. Resource limits | Fixed | Input/depth limits, strict occurrences, recursive scaffolding and bounded matching. |
 | 9. Schema lifecycle | Fixed | Remote registration, distinct URI identity and stale-schema/recompile controller tests. |
 | 10. Recovery and history | Fixed | Undo/redo, dirty-close protection, validated browser recovery and corrupt-recovery tests. |
-| Additional: focus, rendering, CI, standalone theme | Pending | |
+| Additional: focus and rendering | Fixed | Preserve input/caret and native controls; count problems once and update notices locally. |
+| Additional: standalone theme | Pending | |
+| Additional: CI/conformance/browser tests | Pending | |
 
 ## Changes
 
@@ -57,3 +59,7 @@ Remote XSDs are compiled, registered and linked by full URI. Local references li
 ### Fix 10 — history, dirty state and browser recovery
 
 Content transactions record bounded undo/redo snapshots (30 steps, approximately 4 MiB history per document). Tabs show unsaved state; closing dirty documents and leaving the page invoke browser protection. Save/export establishes a saved baseline. Editable documents are recovered through validated versioned drafts in localStorage, with atomic rollback on corrupt recovery. Storage failure is reported and disk saving remains available. Recovery is local to this browser and origin; it is not cloud storage.
+
+### Additional fix — preserve focus and reduce repeated rendering
+
+Full renders restore the active palette input/caret or toolbar control. Native text/select controls keep their keyboard behavior outside palettes. Source-viewer shortcuts are isolated. Notices update their DOM region without rebuilding the tree, and per-node problem counts are computed once per render. Palette action errors surface as notices; rejected rename notices are no longer overwritten by success text. Browser interaction checks are included in the final validation stage.

@@ -265,7 +265,9 @@ function getSchemaForDocument(documentState: AppDocumentState | null): SchemaMod
 
 function setNotice(message: string): void {
   state.notice = message;
-  render();
+  const status = app.querySelector?.<HTMLElement>(".statusbar > div");
+  if (status) status.textContent = message;
+  else render();
 }
 
 function errorMessage(error: unknown): string {
@@ -847,7 +849,7 @@ function runPaletteSelection(option: SearchPaletteOption | string): void {
 
   const handler = state.palette.onSelect;
   closePalette();
-  handler?.(option);
+  try { handler?.(option); } catch (error) { setNotice(errorMessage(error)); }
 }
 
 function getPaletteResults(): SearchPaletteOption[] {
@@ -888,8 +890,8 @@ function updateNodeName(
   node: ElementNode,
   name: string,
   elementDef: ElementDefinition | null = null,
-): void {
-  commitDocumentEdit(documentState, () => {
+): boolean {
+  return commitDocumentEdit(documentState, () => {
   node.name = name;
   node.placeholder = false;
   node.allowedNames = [];
@@ -924,7 +926,7 @@ function openReplaceNodePalette(initialQuery = ""): void {
       if (!trimmed) {
         return;
       }
-      updateNodeName(documentState, node, trimmed);
+      if (!updateNodeName(documentState, node, trimmed)) return;
       setNotice(`Renamed element to "${trimmed}".`);
     }, { placeholder: "Element name" });
     return;
@@ -953,7 +955,7 @@ function openReplaceNodePalette(initialQuery = ""): void {
       const selectedOption = typeof option === "string"
         ? { value: option, elementDef: null }
         : option;
-      updateNodeName(documentState, node, String(selectedOption.value), selectedOption.elementDef || null);
+      if (!updateNodeName(documentState, node, String(selectedOption.value), selectedOption.elementDef || null)) return;
       setNotice(`Replaced node with "${selectedOption.value}".`);
     },
   });
@@ -998,7 +1000,7 @@ function openInsertChildPalette(): void {
 
   openPalette({
     title: "Insert child node",
-    subtitle: "Appends the node only when the schema still validates.",
+    subtitle: "Choose a child and its insertion position.",
     options,
     onSelect: (option) => {
       const selectedOption = typeof option === "string" ? null : option;
@@ -1612,7 +1614,7 @@ function expandOrMoveToChild(): void {
 
 function renderNode(documentState: AppDocumentState, node: ElementNode, isRoot = false): string {
   const selectionClass = documentState.selectedId === node.id ? " selected" : "";
-  const problemCount = documentState.analysis.problems.filter((problem) => problem.nodeId === node.id).length;
+  const problemCount = renderProblemCounts.get(node.id) ?? 0;
   const pills = [];
   if (node.placeholder) {
     pills.push('<span class="node-pill placeholder">placeholder</span>');
@@ -1818,12 +1820,19 @@ function renderPalette(): string {
   </div>`;
 }
 
+let renderProblemCounts = new Map<string, number>();
 function render(): void {
+  const active = document.activeElement;
+  const focusedInput = typeof HTMLInputElement !== "undefined" && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && active.hasAttribute("data-palette-input") ? active : null;
+  const caret = focusedInput ? [focusedInput.selectionStart, focusedInput.selectionEnd] : null;
+  const focusedAction = typeof HTMLElement !== "undefined" && active instanceof HTMLElement ? active.dataset.action : undefined;
   const documentState = getActiveDocument();
   if (documentState) {
     ensureSelection(documentState);
   }
 
+  renderProblemCounts = new Map();
+  for (const problem of documentState?.analysis.problems ?? []) renderProblemCounts.set(problem.nodeId, (renderProblemCounts.get(problem.nodeId) ?? 0) + 1);
   const schemaOptions = getVisibleSchemas().map((schema) =>
     `<option value="${escapeHtml(schema.id)}"${documentState?.schemaId === schema.id ? " selected" : ""}>${escapeHtml(schema.title)}</option>`).join("");
 
@@ -1891,6 +1900,14 @@ function render(): void {
       ${renderSourceViewer()}
     </div>
   `;
+  if (focusedInput) {
+    const input = app.querySelector<HTMLInputElement | HTMLTextAreaElement>("[data-palette-input]");
+    input?.focus();
+    if (input && caret) input.setSelectionRange(caret[0], caret[1]);
+  } else if (focusedAction) {
+    const control = Array.from(app.querySelectorAll<HTMLElement>("[data-action]")).find((element) => element.dataset.action === focusedAction);
+    control?.focus();
+  }
 }
 
 document.addEventListener("click", (event) => {
@@ -2086,6 +2103,11 @@ document.addEventListener("input", (event) => {
 
 document.addEventListener("keydown", (event) => {
   const activeElement = document.activeElement;
+  if (!state.palette && (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement || activeElement instanceof HTMLSelectElement || (activeElement instanceof HTMLElement && activeElement.isContentEditable))) return;
+  if (state.sourceViewer) {
+    if (event.key === "Escape") { event.preventDefault(); closeSourceViewer(); }
+    return;
+  }
   if (state.palette) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -2332,6 +2354,7 @@ export function hasUnsavedChanges(doc: AppDocumentState): boolean {
 export function markSaved(doc: AppDocumentState): void {
   doc.savedFingerprint = documentFingerprint(doc);
   persistRecovery();
+  render();
 }
 export function undoDocumentEdit(redo = false): void {
   const doc = getActiveDocument();
