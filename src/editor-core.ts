@@ -1514,7 +1514,19 @@ export function exportDraftDocument<T>(documentState: T): string {
 }
 
 export function importDraftDocument<T>(serialized: string): T {
-  return JSON.parse(serialized) as T;
+  const value: unknown = JSON.parse(serialized);
+  if (!isRecord(value)) throw new Error("Draft must be an object.");
+  if ("root" in value) validateDraftTree(value.root);
+  for (const key of ["title", "schemaId", "referenceUri", "selectedId", "schemaRegistrationId"]) {
+    if (value[key] != null && typeof value[key] !== "string") throw new Error(`Invalid draft ${key}.`);
+  }
+  if (value.kind !== undefined && !["xml", "xsd"].includes(String(value.kind))) throw new Error("Invalid draft kind.");
+  if (value.mode !== undefined && !["edit", "migration", "freeform"].includes(String(value.mode))) throw new Error("Invalid draft mode.");
+  if (value.schemaReferences !== undefined && (!Array.isArray(value.schemaReferences) || !value.schemaReferences.every((entry) => typeof entry === "string"))) throw new Error("Invalid schema references.");
+  for (const key of ["readOnly", "allowAutoLeaveMigration"]) {
+    if (value[key] !== undefined && typeof value[key] !== "boolean") throw new Error(`Invalid draft ${key}.`);
+  }
+  return value as T;
 }
 
 export function flattenVisibleItems(root: ElementNode): VisibleTreeItem[] {
@@ -1573,4 +1585,24 @@ export function fuzzySearch<T extends FuzzyOption>(query: string, options: reado
     .filter((entry) => entry.score > -trimmed.length)
     .sort((left, right) => right.score - left.score || left.option.label.localeCompare(right.option.label))
     .map((entry) => entry.option);
+}
+
+function validateDraftTree(value: unknown, depth = 0, budget = { nodes: 0 }): asserts value is ElementNode {
+  if (depth > 128 || ++budget.nodes > 10000) throw new Error("Draft exceeds tree limits.");
+  if (!isRecord(value)) throw new Error("Invalid draft node.");
+  for (const key of ["id", "name", "text"]) {
+    if (typeof value[key] !== "string") throw new Error(`Invalid node ${key}.`);
+  }
+  for (const key of ["placeholder", "textPlaceholder", "collapsed"]) {
+    if (typeof value[key] !== "boolean") throw new Error(`Invalid node ${key}.`);
+  }
+  if (!Array.isArray(value.allowedNames) || !value.allowedNames.every((entry) => typeof entry === "string")) throw new Error("Invalid allowed names.");
+  if (!Array.isArray(value.attributes) || !Array.isArray(value.children)) throw new Error("Invalid node collections.");
+  if (value.attributes.length > 1000) throw new Error("Too many attributes.");
+  for (const attribute of value.attributes) {
+    if (!isRecord(attribute) || !["id", "name", "value"].every((key) => typeof attribute[key] === "string")
+      || typeof attribute.placeholder !== "boolean" || !Array.isArray(attribute.expectedValues)
+      || !attribute.expectedValues.every((entry) => typeof entry === "string")) throw new Error("Invalid draft attribute.");
+  }
+  for (const child of value.children) validateDraftTree(child, depth + 1, budget);
 }

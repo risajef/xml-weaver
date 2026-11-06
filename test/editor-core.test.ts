@@ -270,3 +270,13 @@ describe("serialization and drafts", () => {
     expect(schema.complexTypes.get("bookType")?.attributes[0]?.use).toBe(AttributeUse.Required);
   });
 });
+
+
+describe("draft trust boundary", () => {
+  it("rejects malformed nested trees and metadata", () => {
+    expect(() => importDraftDocument('{"root":{"name":"x"}}')).toThrow("Invalid");
+    expect(() => importDraftDocument('{"schemaReferences":[4]}')).toThrow("references");
+    expect(() => importDraftDocument('{"mode":"anything"}')).toThrow("mode");
+    expect(() => importDraftDocument('[]')).toThrow("object");
+  });
+});

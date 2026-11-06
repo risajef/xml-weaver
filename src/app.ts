@@ -597,14 +597,14 @@ function createDraftDocument(fileName: string, draftJson: string): AppDocumentSt
     title: loaded.title || fileName,
     fileName,
     kind: loaded.kind || "xml",
-    root: loaded.root,
+    root: withFreshIds(loaded.root),
     schemaId: loaded.schemaId || null,
     schemaReferences: loaded.schemaReferences || [],
     mode: loaded.mode || "edit",
     readOnly: loaded.readOnly ?? false,
     referenceUri: loaded.referenceUri || null,
     allowAutoLeaveMigration: loaded.allowAutoLeaveMigration ?? true,
-    selectedId: loaded.selectedId || loaded.root?.id,
+    selectedId: null,
     analysis: createEmptyAnalysis(),
     schemaRegistrationId: loaded.schemaRegistrationId || null,
   };
@@ -1560,7 +1560,7 @@ function renderNode(documentState: AppDocumentState, node: ElementNode, isRoot =
       if (attribute.placeholder) {
         classes.push("placeholder");
       }
-      return `<button class="${classes.join(" ")}" data-select-id="${attribute.id}">
+      return `<button class="${classes.join(" ")}" data-select-id="${escapeHtml(attribute.id)}">
           <span class="attr-name">${escapeHtml(attribute.name)}</span>
           <span>${escapeHtml(attribute.value || "?")}</span>
         </button>`;
@@ -1569,11 +1569,11 @@ function renderNode(documentState: AppDocumentState, node: ElementNode, isRoot =
 
   const showText = node.text || node.textPlaceholder;
   const inlineText = showText && node.attributes.length === 0
-    ? `<button class="text-chip inline-text${documentState.selectedId === `text:${node.id}` ? " selected" : ""}${node.textPlaceholder ? " placeholder" : ""}" data-select-id="text:${node.id}">${escapeHtml(node.text || "?")}</button>`
+    ? `<button class="text-chip inline-text${documentState.selectedId === `text:${escapeHtml(node.id)}` ? " selected" : ""}${node.textPlaceholder ? " placeholder" : ""}" data-select-id="text:${escapeHtml(node.id)}">${escapeHtml(node.text || "?")}</button>`
     : "";
   const textRow = showText && !inlineText
     ? `<div class="text-row compact-text-row">
-        <button class="text-chip${documentState.selectedId === `text:${node.id}` ? " selected" : ""}${node.textPlaceholder ? " placeholder" : ""}" data-select-id="text:${node.id}">${escapeHtml(node.text || "?")}</button>
+        <button class="text-chip${documentState.selectedId === `text:${escapeHtml(node.id)}` ? " selected" : ""}${node.textPlaceholder ? " placeholder" : ""}" data-select-id="text:${escapeHtml(node.id)}">${escapeHtml(node.text || "?")}</button>
       </div>`
     : "";
 
@@ -1581,10 +1581,10 @@ function renderNode(documentState: AppDocumentState, node: ElementNode, isRoot =
     ? `<div class="children">${node.children.map((child) => renderNode(documentState, child, false)).join("")}</div>`
     : "";
 
-  return `<div class="node-card${isRoot ? " root-node" : ""}${node.placeholder ? " placeholder" : ""}${selectionClass}" data-select-id="${node.id}">
+  return `<div class="node-card${isRoot ? " root-node" : ""}${node.placeholder ? " placeholder" : ""}${selectionClass}" data-select-id="${escapeHtml(node.id)}">
     <div class="node-header">
       ${node.children.length
-        ? `<button class="node-toggle" data-action="toggle-collapse" data-node-id="${node.id}">${node.collapsed ? "+" : "-"}</button>`
+        ? `<button class="node-toggle" data-action="toggle-collapse" data-node-id="${escapeHtml(node.id)}">${node.collapsed ? "+" : "-"}</button>`
         : ""}
       <span class="node-name">${escapeHtml(node.placeholder ? "placeholder" : node.name)}</span>
       ${attributeRow}
@@ -1755,7 +1755,7 @@ function render(): void {
   }
 
   const schemaOptions = getVisibleSchemas().map((schema) =>
-    `<option value="${schema.id}"${documentState?.schemaId === schema.id ? " selected" : ""}>${escapeHtml(schema.title)}</option>`).join("");
+    `<option value="${escapeHtml(schema.id)}"${documentState?.schemaId === schema.id ? " selected" : ""}>${escapeHtml(schema.title)}</option>`).join("");
 
   app.innerHTML = `
     <div class="app-shell${documentState?.mode === "migration" ? " migration-mode" : ""}">
@@ -1786,10 +1786,10 @@ function render(): void {
       </div>
       <div class="tabbar">
         ${state.documents.map((entry) => `
-          <button class="tab${entry.id === state.activeDocumentId ? " active" : ""}${entry.mode === "migration" ? " migration" : ""}" data-tab-id="${entry.id}">
+          <button class="tab${entry.id === state.activeDocumentId ? " active" : ""}${entry.mode === "migration" ? " migration" : ""}" data-tab-id="${escapeHtml(entry.id)}">
             ${state.showShortcutHints ? `<span class="tab-shortcut">${state.documents.indexOf(entry) + 1}</span>` : ""}
             ${escapeHtml(entry.title)}
-            <span data-close-id="${entry.id}">x</span>
+            <span data-close-id="${escapeHtml(entry.id)}">x</span>
           </button>
         `).join("")}
       </div>
