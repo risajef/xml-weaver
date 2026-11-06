@@ -75,3 +75,7 @@ Independent lxml comparisons exposed rejection of empty content for required gro
 ### Validation follow-up — supported-schema symbol and grammar checks
 
 Simple types now resolve forward references with cycle detection. Builtin types remain distinct from same-local-name user types. Duplicate declarations, invalid declaration structure and widening enumeration restrictions fail compilation. Enumeration equality preserves decimal precision and floating infinity semantics. Added regressions and retained the explicit subset contract.
+
+### Namespace/edit follow-up — qualified attribute creation
+
+Required and optional attribute insertion now allocates explicit namespace prefixes when the schema qualifies attributes. Scaffolds remain valid when child qualification differs from the root. Fully populated XSD edits are also compiled inside the transaction, so an unsupported type reference cannot silently leave normal edit mode. Added a qualified-attribute scaffold regression.

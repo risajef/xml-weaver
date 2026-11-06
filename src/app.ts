@@ -1,6 +1,7 @@
 import { createHistory, recordEdit, traverseHistory, type History } from "./history";
 import {
   analyzeDocument,
+  addAttributeFromDefinition,
   INPUT_LIMIT,
   getXmlSchemaReferences,
   canAppendChild,
@@ -1072,13 +1073,7 @@ function openInsertAttributePalette(): void {
       if (!definition) {
         return;
       }
-      if (!commitDocumentEdit(documentState, () => { targetNode.attributes.push({
-        id: `attr-${crypto.randomUUID()}`,
-        name: definition.name,
-        value: "",
-        placeholder: true,
-        expectedValues: definition.valueType?.enumerations || [],
-      }); })) return;
+      if (!commitDocumentEdit(documentState, () => { addAttributeFromDefinition(targetNode, definition); })) return;
       setNotice(`Inserted attribute "${definition.name}".`);
     },
   });
@@ -2311,6 +2306,7 @@ export function commitDocumentEdit(documentState: AppDocumentState, mutate: () =
     if (documentState.mode !== "migration") {
       const error = analysis.problems.find((problem) => problem.code !== ProblemCode.Placeholder);
       if (error) throw new Error(error.message);
+      if (documentState.kind === "xsd" && !analysis.problems.length) parseXmlSchema(renderSourceXml(documentState.root));
     }
   } catch (error) {
     documentState.root = previous;

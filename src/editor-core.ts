@@ -680,7 +680,7 @@ function createMinimalNodeForElement(schema: SchemaModel, elementDef: ElementDef
 
   for (const attributeDef of type.attributes) {
     if (attributeDef.use === AttributeUse.Required) {
-      node.attributes.push(createMinimalAttribute(attributeDef));
+      addAttributeFromDefinition(node, attributeDef);
     }
   }
 
@@ -1446,7 +1446,7 @@ export function fillRequiredScaffolding(node: ElementNode, schema: SchemaModel, 
 
     for (const attributeDef of type.attributes) {
       if (attributeDef.use === AttributeUse.Required && !node.attributes.some((attribute) => localName(attribute.name) === attributeDef.name)) {
-        node.attributes.push(createMinimalAttribute(attributeDef));
+        addAttributeFromDefinition(node, attributeDef);
       }
     }
 
@@ -1924,4 +1924,17 @@ function resolveDeclaredSimple(node: XmlRecord, name: string, registry: Registry
   const uri = expandedNamespace(name, node[SCHEMA_CONTEXT]?.namespaces ?? {}, false);
   if (uri === XSD_NAMESPACE && BUILTIN_TYPES.has(localName(name))) return resolveBuiltinSimpleType(name);
   return resolveNamedSimple(localName(name), registry);
+}
+
+export function addAttributeFromDefinition(node: ElementNode, definition: AttributeDefinition): AttributeNode {
+  const attribute = createMinimalAttribute(definition);
+  if (definition.namespaceUri) {
+    let index = 1;
+    while (node.attributes.some((entry) => entry.name === `xmlns:attr${index}`)) index++;
+    const prefix = `attr${index}`;
+    node.attributes.push(createAttributeNode(`xmlns:${prefix}`, definition.namespaceUri));
+    attribute.name = `${prefix}:${definition.name}`;
+  }
+  node.attributes.push(attribute);
+  return attribute;
 }

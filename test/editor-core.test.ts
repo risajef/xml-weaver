@@ -402,3 +402,16 @@ describe("supported schema symbol resolution", () => {
     expect(() => parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:simpleType name="a"><xs:restriction base="xs:string"><xs:enumeration value="a"/></xs:restriction></xs:simpleType><xs:simpleType name="b"><xs:restriction base="a"><xs:enumeration value="b"/></xs:restriction></xs:simpleType></xs:schema>')).toThrow("enumeration");
   });
 });
+
+
+describe("qualified attribute scaffolding", () => {
+  it("creates explicit attribute prefixes and correct local child qualification", () => {
+    const s = parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:t" attributeFormDefault="qualified"><xs:element name="r"><xs:complexType><xs:sequence><xs:element name="child" type="xs:string"/></xs:sequence><xs:attribute name="id" type="xs:int" use="required"/></xs:complexType></xs:element></xs:schema>');
+    const root = createMinimalDocument(s,"r");
+    const id = root.attributes.find((attribute)=>attribute.name.endsWith(":id"))!;
+    id.value="7";id.placeholder=false;
+    root.children[0].text="ok";root.children[0].textPlaceholder=false;
+    expect(serializeXml(root,s)).toContain('xmlns:attr1="urn:t"');
+    expect(analyzeDocument(root,s).problems).toEqual([]);
+  });
+});
