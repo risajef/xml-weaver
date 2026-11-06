@@ -33,3 +33,5 @@ npm run build
 XML 1.0 elements, attributes, namespaces, text and ordered mixed content round-trip. Comments, processing instructions other than the XML declaration, and DTD/entity declarations are rejected explicitly. The tree view edits leading text while preserving trailing mixed-content text.
 
 Schema validation uses an explicit XSD subset: named/inline simple and complex types, element references, ordered sequences/choices, occurrence bounds, attributes, simple-content extension, and enumeration restrictions. Builtins: string, boolean, integer, int, long, short, decimal, float, double. Unsupported constructs/facets (including patterns, imports/includes, complex-content derivation, lists, unions, wildcards and identity constraints) produce compilation errors. This is not a full XSD implementation.
+
+Resource limits: 1 MiB input, 5,000 elements, 128 levels, 1,000 attributes per element, finite occurrence bounds up to 1,000, and 10,000 matching steps per content model. Oversized or excessively ambiguous documents fail explicitly.

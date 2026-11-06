@@ -350,3 +350,19 @@ describe("namespace identity", () => {
     expect(() => parseXmlSchema('<schema><element name="r" type="string"/></schema>')).toThrow("namespace");
   });
 });
+
+
+describe("resource budgets", () => {
+  it("rejects required recursive scaffolds with an actionable error", () => {
+    const recursive = parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r"><xs:complexType><xs:sequence><xs:element ref="r"/></xs:sequence></xs:complexType></xs:element></xs:schema>');
+    expect(() => createMinimalDocument(recursive, "r")).toThrow("finite minimal tree");
+    expect(analyzeDocument(parseXmlString('<r/>').root, recursive).problems.length).toBeGreaterThan(0);
+  });
+  it.each([{ "@_minOccurs":"2x" }, { "@_minOccurs":"-1" }, { "@_minOccurs":"2", "@_maxOccurs":"1" }, { "@_minOccurs":"999999999" }])("rejects invalid occurrence bounds %j", (input) => {
+    expect(() => normalizeOccurs(input)).toThrow();
+  });
+  it("rejects oversized and excessively deep input before parsing", () => {
+    expect(() => parseXmlString('<r>' + 'x'.repeat(1024*1024) + '</r>')).toThrow("limit");
+    expect(() => parseXmlString('<r>'.repeat(200) + '</r>'.repeat(200))).toThrow("limits");
+  });
+});

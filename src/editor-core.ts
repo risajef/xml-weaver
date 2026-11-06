@@ -418,12 +418,24 @@ function parseAttribute(node: XmlRecord, registry: Registry): AttributeDefinitio
   return { name, use, valueType, namespaceUri: (readString(node, "@_form") ?? context?.attributeForm) === "qualified" ? context?.target ?? "" : "" };
 }
 
+export const INPUT_LIMIT = 1024 * 1024;
+const NODE_LIMIT = 5000;
+const DEPTH_LIMIT = 128;
+
 export function normalizeOccurs(node: XmlRecord): { minOccurs: number; maxOccurs: number } {
-  const minOccurs = Number.parseInt(readString(node, "@_minOccurs") ?? "1", 10);
+  const parse = (raw: string): number => {
+    if (!/^\d+$/.test(raw) || Number(raw) > 1000) throw new Error("Occurrence bounds must be integers from 0 to 1000 (or unbounded maxOccurs).");
+    return Number(raw);
+  };
+  const minOccurs = parse(readString(node, "@_minOccurs") ?? "1");
   const rawMax = readString(node, "@_maxOccurs") ?? "1";
-  const maxOccurs = rawMax === "unbounded" ? Number.POSITIVE_INFINITY : Number.parseInt(rawMax, 10);
+  const maxOccurs = rawMax === "unbounded" ? Infinity : parse(rawMax);
+  if (minOccurs > maxOccurs) throw new Error("minOccurs exceeds maxOccurs.");
   return { minOccurs, maxOccurs };
 }
+
+interface ScaffoldBudget { remaining: number; types: Set<ResolvedType>; }
+function scaffoldBudget(): ScaffoldBudget { return { remaining: NODE_LIMIT, types: new Set() }; }
 
 function parseElement(node: XmlRecord, registry: Registry): ElementDefinition {
   const occurs = normalizeOccurs(node);
@@ -640,13 +652,15 @@ function createPlaceholderNode(allowedNames: string[]): ElementNode {
   });
 }
 
-function createMinimalNodeForElement(schema: SchemaModel, elementDef: ElementDefinition | null): ElementNode {
+function createMinimalNodeForElement(schema: SchemaModel, elementDef: ElementDefinition | null, budget = scaffoldBudget()): ElementNode {
+  if (--budget.remaining < 0 || budget.types.size >= DEPTH_LIMIT) throw new Error("Scaffold exceeds tree limits.");
   const resolvedElement = getElementDefinition(schema, elementDef);
   if (!resolvedElement) {
     return createElementNode(elementDef?.name ?? "unknown", { placeholder: true });
   }
 
   const type = resolveType(schema, resolvedElement);
+  if (budget.types.has(type)) throw new Error("Required recursive content has no finite minimal tree. Make a recursive branch optional or use a choice placeholder.");
   const node = createElementNode(resolvedElement.name);
   // Explicit default binding keeps scaffolded names correct under any parent.
   if (resolvedElement.namespaceUri !== undefined) node.attributes.push(createAttributeNode("xmlns", resolvedElement.namespaceUri));
@@ -667,7 +681,9 @@ function createMinimalNodeForElement(schema: SchemaModel, elementDef: ElementDef
   }
 
   if (type.content) {
-    node.children.push(...createMinimalChildrenForParticle(schema, type.content));
+    budget.types.add(type);
+    node.children.push(...createMinimalChildrenForParticle(schema, type.content, budget));
+    budget.types.delete(type);
   }
 
   return node;
@@ -677,7 +693,7 @@ export function createMinimalNodeFromDefinition(schema: SchemaModel, elementDef:
   return createMinimalNodeForElement(schema, elementDef);
 }
 
-function createMinimalChildrenForParticle(schema: SchemaModel, particle: Particle | null): ElementNode[] {
+function createMinimalChildrenForParticle(schema: SchemaModel, particle: Particle | null, budget = scaffoldBudget()): ElementNode[] {
   if (!particle) {
     return [];
   }
@@ -687,20 +703,20 @@ function createMinimalChildrenForParticle(schema: SchemaModel, particle: Particl
 
   for (let occurrenceIndex = 0; occurrenceIndex < minOccurs; occurrenceIndex += 1) {
     if (particle.kind === ParticleKind.Element) {
-      nodes.push(createMinimalNodeForElement(schema, particle));
+      nodes.push(createMinimalNodeForElement(schema, particle, budget));
       continue;
     }
 
     if (particle.kind === ParticleKind.Sequence) {
       for (const item of particle.items) {
-        nodes.push(...createMinimalChildrenForParticle(schema, item));
+        nodes.push(...createMinimalChildrenForParticle(schema, item, budget));
       }
       continue;
     }
 
     const options = particle.items.flatMap((item) => getElementNamesFromParticle(item));
     if (options.length === 1) {
-      nodes.push(...createMinimalChildrenForParticle(schema, particle.items[0] ?? null));
+      nodes.push(...createMinimalChildrenForParticle(schema, particle.items[0] ?? null, budget));
     } else if (options.length > 1) {
       nodes.push(createPlaceholderNode(options));
     }
@@ -740,6 +756,7 @@ function enumerateSingleMatch(
   particle: Particle | null,
   children: ElementNode[],
   index: number,
+  budget: { steps: number },
 ): MatchResult[] {
   if (!particle) {
     return [{ index, assignments: [] }];
@@ -760,14 +777,14 @@ function enumerateSingleMatch(
   }
 
   if (particle.kind === ParticleKind.Choice) {
-    return particle.items.flatMap((item) => enumerateMatches(schema, item, children, index));
+    return particle.items.flatMap((item) => enumerateMatches(schema, item, children, index, budget));
   }
 
   let states: MatchResult[] = [{ index, assignments: [] }];
   for (const item of particle.items) {
     const nextStates: MatchResult[] = [];
     for (const state of states) {
-      for (const result of enumerateMatches(schema, item, children, state.index)) {
+      for (const result of enumerateMatches(schema, item, children, state.index, budget)) {
         nextStates.push({
           index: result.index,
           assignments: state.assignments.concat(result.assignments),
@@ -788,6 +805,7 @@ function enumerateMatches(
   particle: Particle | null,
   children: ElementNode[],
   index = 0,
+  budget = { steps: 0 },
 ): MatchResult[] {
   if (!particle) {
     return [{ index, assignments: [] }];
@@ -806,7 +824,8 @@ function enumerateMatches(
       return;
     }
 
-    for (const singleResult of enumerateSingleMatch(schema, singleParticle, children, currentIndex)) {
+    if (++budget.steps > 10000) throw new Error("Schema matching exceeds work limit. Simplify ambiguous content or split the document.");
+    for (const singleResult of enumerateSingleMatch(schema, singleParticle, children, currentIndex, budget)) {
       if (singleResult.index === currentIndex) {
         continue;
       }
@@ -874,8 +893,7 @@ function analyzeChildren(
   }
 
   if (!exact) {
-    const minimumChildren = createMinimalChildrenForParticle(schema, type.content);
-    if (children.length < minimumChildren.length) {
+    {
       problems.push({
         code: ProblemCode.MissingRequiredChild,
         nodeId: node.id,
@@ -1238,6 +1256,7 @@ export function parseXmlSchema(xsdText: string): SchemaModel {
 }
 
 export function analyzeDocument(root: ElementNode, schema: SchemaModel | null): AnalysisResult {
+  checkTreeLimits(root);
   const results: AnalysisResult = {
     problems: [],
     nodeInfoById: new Map(),
@@ -1591,6 +1610,7 @@ export function exportDraftDocument<T>(documentState: T): string {
 }
 
 export function importDraftDocument<T>(serialized: string): T {
+  assertInputLimit(serialized);
   const value: unknown = JSON.parse(serialized);
   if (!isRecord(value)) throw new Error("Draft must be an object.");
   if ("root" in value) validateDraftTree(value.root);
@@ -1697,7 +1717,34 @@ function assertXmlName(name: string): void {
   if (!XML_NAME.test(name)) throw new Error(`Invalid XML name: ${name}`);
 }
 
+export function assertInputLimit(text: string): void {
+  if (text.length > INPUT_LIMIT || new TextEncoder().encode(text).byteLength > INPUT_LIMIT) throw new Error("Input exceeds the 1 MiB limit.");
+}
+
+function checkTreeLimits(root: ElementNode): void {
+  const stack = [{node: root, depth: 0}];
+  let count = 0;
+  while (stack.length) {
+    const {node, depth} = stack.pop()!;
+    if (++count > NODE_LIMIT || depth > DEPTH_LIMIT) throw new Error("Document exceeds tree limits.");
+    if (node.attributes.length > 1000) throw new Error("Too many attributes.");
+    node.children.forEach((child) => stack.push({node: child, depth: depth + 1}));
+  }
+}
+
 function validateXmlSyntax(text: string): void {
+  assertInputLimit(text);
+  let depth = 0, count = 0;
+  // Skip CDATA and comments as units; quoted '>' characters cannot end a tag.
+  for (const token of text.matchAll(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<(?:"[^"]*"|'[^']*'|[^'">])*>/g)) {
+    const tag = token[0];
+    if (tag.startsWith("<?") || tag.startsWith("<!")) continue;
+    if (tag.startsWith("</")) depth--;
+    else {
+      if (++count > NODE_LIMIT || depth >= DEPTH_LIMIT) throw new Error("XML exceeds tree limits.");
+      if (!tag.endsWith("/>")) depth++;
+    }
+  }
   if (/<!DOCTYPE|<!ENTITY/i.test(text)) throw new Error("DTD and entity declarations are not supported.");
   if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDFFF]/u.test(text)) throw new Error("Invalid XML character.");
   const result = XMLValidator.validate(text);

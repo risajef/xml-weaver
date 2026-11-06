@@ -1,5 +1,6 @@
 import {
   analyzeDocument,
+  INPUT_LIMIT,
   canAppendChild,
   canDeleteAttribute,
   canDeleteNode,
@@ -419,7 +420,8 @@ async function openSchemaReference(reference: string, baseReference?: string | n
     if (!response.ok) {
       throw new Error(`Request failed with ${response.status}`);
     }
-    const xmlText = await response.text();
+    if (Number(response.headers?.get("content-length") ?? 0) > INPUT_LIMIT) throw new Error("Schema exceeds the 1 MiB limit.");
+    const xmlText = await readBoundedResponse(response);
     addDocument(createReadonlySchemaDocument(resolvedReference, xmlText, resolvedReference));
     setNotice(`Opened linked schema "${basename(resolvedReference)}" as read-only.`);
   } catch (error) {
@@ -1469,6 +1471,7 @@ function exportCurrentDocument(): void {
 
 function handleFiles(files: FileList, processor: (fileName: string, text: string) => void): void {
   for (const file of Array.from(files)) {
+    if (file.size > INPUT_LIMIT) { setNotice("Input exceeds the 1 MiB limit."); continue; }
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -2207,3 +2210,27 @@ render();
 
 // Workspace operations are exported for adapters and controller integration tests.
 export { state, openDetectedDocument, createDraftDocument, addDocument, syncDocumentValidation, updateSchemaLink, saveDraft, exportCurrentDocument };
+
+async function readBoundedResponse(response: Response): Promise<string> {
+  if (!response.body) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > INPUT_LIMIT) throw new Error("Schema exceeds the 1 MiB limit.");
+    return text;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      length += chunk.value.byteLength;
+      if (length > INPUT_LIMIT) throw new Error("Schema exceeds the 1 MiB limit.");
+      chunks.push(chunk.value);
+    }
+  } finally { await reader.cancel(); }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  return new TextDecoder().decode(bytes);
+}
