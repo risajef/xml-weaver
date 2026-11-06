@@ -389,3 +389,16 @@ describe("nullable content groups", () => {
     expect(analyzeDocument(parseXmlString('<r><a>x</a></r>').root,s).problems).toEqual([]);
   });
 });
+
+
+describe("supported schema symbol resolution", () => {
+  it("resolves forward simple types and preserves builtin namespace identity", () => {
+    const s = parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:simpleType name="derived"><xs:restriction base="base"/></xs:simpleType><xs:simpleType name="base"><xs:restriction base="xs:int"/></xs:simpleType><xs:simpleType name="string"><xs:restriction base="xs:int"/></xs:simpleType><xs:element name="r" type="xs:string"/></xs:schema>');
+    expect(s.simpleTypes.get("derived")?.base).toBe(SimpleBase.Number);
+    expect(analyzeDocument(parseXmlString('<r>text</r>').root,s).problems).toEqual([]);
+  });
+  it("rejects duplicate declarations and widening enumeration restrictions", () => {
+    expect(() => parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r" type="xs:string"/><xs:element name="r" type="xs:int"/></xs:schema>')).toThrow("Duplicate");
+    expect(() => parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:simpleType name="a"><xs:restriction base="xs:string"><xs:enumeration value="a"/></xs:restriction></xs:simpleType><xs:simpleType name="b"><xs:restriction base="a"><xs:enumeration value="b"/></xs:restriction></xs:simpleType></xs:schema>')).toThrow("enumeration");
+  });
+});

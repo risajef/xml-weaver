@@ -247,6 +247,8 @@ export interface FuzzyOption {
 }
 
 interface Registry {
+  simpleSources: Map<string, XmlRecord>;
+  resolving: Set<string>;
   simpleTypes: Map<string, SimpleTypeDefinition>;
   complexTypes: Map<string, ComplexTypeDefinition>;
   elements: Map<string, ElementDefinition>;
@@ -391,9 +393,11 @@ function parseSimpleType(node: XmlRecord, registry: Registry): SimpleTypeDefinit
   }
 
   const baseName = readString(restriction, "@_base") ?? SimpleBase.String;
-  const typeFromRegistry = registry.simpleTypes.get(localName(baseName));
-  const inherited = typeFromRegistry ? clone(typeFromRegistry) : resolveBuiltinSimpleType(baseName);
+  const inherited = resolveDeclaredSimple(restriction, baseName, registry);
   const enumerations = parseEnumerationValues(restriction);
+  for (const value of enumerations) {
+    if (validateSimpleValue(inherited, value)) throw new Error(`Invalid enumeration restriction value: ${value}`);
+  }
   if (enumerations.length) inherited.enumerations = enumerations;
   return inherited;
 }
@@ -409,8 +413,7 @@ function parseAttribute(node: XmlRecord, registry: Registry): AttributeDefinitio
   } else {
     const declaredType = readString(node, "@_type");
     if (declaredType) {
-      const registered = registry.simpleTypes.get(localName(declaredType));
-      valueType = registered ? clone(registered) : resolveBuiltinSimpleType(declaredType);
+      valueType = resolveDeclaredSimple(node, declaredType, registry);
     }
   }
 
@@ -453,7 +456,8 @@ function parseElement(node: XmlRecord, registry: Registry): ElementDefinition {
   } else {
     const declaredType = readString(node, "@_type");
     if (declaredType) {
-      typeName = localName(declaredType);
+      const uri = expandedNamespace(declaredType, node[SCHEMA_CONTEXT]?.namespaces ?? {}, false);
+      typeName = uri === XSD_NAMESPACE && BUILTIN_TYPES.has(localName(declaredType)) ? `xs:${localName(declaredType)}` : localName(declaredType);
     }
   }
 
@@ -540,8 +544,7 @@ function parseComplexType(node: XmlRecord, registry: Registry): ComplexTypeDefin
     const extension = findNamedChild(simpleContent, "extension") ?? findNamedChild(simpleContent, "restriction");
     if (isRecord(extension)) {
       const base = readString(extension, "@_base") ?? SimpleBase.String;
-      const registered = registry.simpleTypes.get(localName(base));
-      textType = registered ? clone(registered) : resolveBuiltinSimpleType(base);
+      textType = resolveDeclaredSimple(extension, base, registry);
       for (const attribute of arrayify(findNamedChild(extension, "attribute"))) {
         if (isRecord(attribute)) {
           attributes.push(parseAttribute(attribute, registry));
@@ -579,6 +582,7 @@ function resolveType(schema: SchemaModel, elementDef: ElementDefinition): Resolv
     };
   }
 
+  if (elementDef.typeName.startsWith("xs:")) return resolveBuiltinSimpleType(elementDef.typeName);
   const complex = schema.complexTypes.get(elementDef.typeName);
   if (complex) {
     return complex;
@@ -589,7 +593,7 @@ function resolveType(schema: SchemaModel, elementDef: ElementDefinition): Resolv
     return simple;
   }
 
-  return resolveBuiltinSimpleType(elementDef.typeName);
+  throw new Error(`Unsupported or unresolved type: ${elementDef.typeName}`);
 }
 
 function getElementDefinition(schema: SchemaModel, elementDef: ElementDefinition | null): ElementDefinition | null {
@@ -744,8 +748,20 @@ export function validateSimpleValue(type: SimpleTypeDefinition | null | undefine
     }
   }
   if (type?.enumerations.length) {
-    const canonical = (entry: string): string => type.base === SimpleBase.Boolean ? (["1", "true"].includes(entry.trim()) ? "true" : "false")
-      : type.base === SimpleBase.Number ? (["int", "integer", "long", "short"].includes(builtin ?? "") ? BigInt(entry.trim()).toString() : String(Number(entry.trim()))) : entry;
+    const canonical = (entry: string): string => {
+      if (type.base === SimpleBase.Boolean) return ["1", "true"].includes(entry.trim()) ? "true" : "false";
+      if (type.base !== SimpleBase.Number) return entry;
+      if (["int", "integer", "long", "short"].includes(builtin ?? "")) return BigInt(entry.trim()).toString();
+      if (builtin === "decimal") {
+        const negative = entry.trim().startsWith("-");
+        const [integer, fraction = ""] = entry.trim().replace(/^[+-]/, "").split(".");
+        const digits = (integer.replace(/^0+/, "") || "0") + "." + fraction.replace(/0+$/, "");
+        return negative && digits !== "0." ? "-" + digits : digits;
+      }
+      const trimmed = entry.trim();
+      const number = trimmed === "INF" ? Infinity : trimmed === "-INF" ? -Infinity : Number(trimmed);
+      return String(builtin === "float" ? Math.fround(number) : number);
+    };
     if (!type.enumerations.some((entry) => canonical(entry) === canonical(text))) return `Expected one of: ${type.enumerations.join(", ")}`;
   }
   return null;
@@ -1171,6 +1187,8 @@ export function parseXmlSchema(xsdText: string): SchemaModel {
   checkSchemaSubset(schemaNode, "schema");
   const registry: Registry = {
     simpleTypes: new Map(),
+    simpleSources: new Map(),
+    resolving: new Set(),
     complexTypes: new Map(),
     elements: new Map(),
   };
@@ -1190,10 +1208,12 @@ export function parseXmlSchema(xsdText: string): SchemaModel {
       }
       const name = readString(entry, "@_name");
       if (name) {
-        registry.simpleTypes.set(name, parseSimpleType(entry, registry));
+        registry.simpleSources.set(name, entry);
       }
     }
   }
+
+  for (const name of registry.simpleSources.keys()) resolveNamedSimple(name, registry);
 
   for (const [key, value] of Object.entries(schemaNode)) {
     if (key.startsWith("@_")) {
@@ -1774,6 +1794,41 @@ function checkSchemaSubset(node: XmlRecord, tag: string): void {
     }
   }
   const children = (node[ORDERED_CHILDREN] ?? []).filter(([name]) => name !== "#text");
+  const name = readString(node, "@_name");
+  if (name !== undefined && (!XML_NAME.test(name) || name.includes(":"))) throw new Error(`Invalid declaration name: ${name}`);
+  const context = node[SCHEMA_CONTEXT];
+  if (tag === "schema") {
+    const symbols = new Set<string>();
+    for (const [lexical, value] of children) {
+      if (!isRecord(value)) continue;
+      const kind = localName(lexical);
+      const declared = readString(value, "@_name");
+      if (!declared) throw new Error(`Global ${kind} requires a name.`);
+      const key = `${kind === "element" ? "element" : "type"}:${declared}`;
+      if (symbols.has(key)) throw new Error(`Duplicate declaration: ${declared}`);
+      symbols.add(key);
+    }
+  }
+  if (tag === "element" && context?.global && ["ref", "minOccurs", "maxOccurs", "form"].some((field) => node[`@_${field}`] !== undefined)) throw new Error("Unsupported global element constraint.");
+  if (tag === "element" && node["@_name"] && node["@_ref"]) throw new Error("Element cannot have both name and ref.");
+  if (["restriction", "extension"].includes(tag) && !node["@_base"]) throw new Error(`${tag} requires a base.`);
+  if (tag === "enumeration" && node["@_value"] === undefined) throw new Error("Enumeration requires a value.");
+  if (tag === "attribute" && (!name || (node["@_type"] !== undefined && children.length))) throw new Error("Invalid attribute declaration.");
+  if (["attribute", "element"].includes(tag) && children.length > 1) throw new Error("Only one inline type is allowed.");
+  if (tag === "simpleContent" && children.length !== 1) throw new Error("simpleContent requires an extension.");
+  if (tag === "complexType") {
+    let attributesStarted = false;
+    const names = new Set<string>();
+    for (const [lexical, child] of children) {
+      if (localName(lexical) === "attribute") {
+        attributesStarted = true;
+        const name = isRecord(child) ? readString(child, "@_name") : "";
+        if (names.has(name ?? "")) throw new Error("Duplicate attribute declaration.");
+        names.add(name ?? "");
+      } else if (attributesStarted) throw new Error("Content model must precede attributes.");
+    }
+  }
+
   if (tag === "simpleType" && children.length !== 1) throw new Error("simpleType requires one restriction.");
   if (tag === "complexType" && children.filter(([name]) => localName(name) !== "attribute").length > 1) throw new Error("Multiple complex content models are not supported.");
   if (tag === "element") {
@@ -1849,4 +1904,24 @@ export function canAppendChild(root: ElementNode, schema: SchemaModel | null, no
 
 export function getXmlSchemaReferences(root: ElementNode): string[] {
   return gatherSchemaReferences({ ":@": Object.fromEntries(root.attributes.map((attribute) => [`@_${attribute.name}`, attribute.value])) });
+}
+
+function resolveNamedSimple(name: string, registry: Registry): SimpleTypeDefinition {
+  const existing = registry.simpleTypes.get(name);
+  if (existing) return clone(existing);
+  const source = registry.simpleSources.get(name);
+  if (!source) throw new Error(`Unsupported or unresolved type: ${name}`);
+  if (registry.resolving.has(name)) throw new Error(`Cyclic simple type: ${name}`);
+  registry.resolving.add(name);
+  try {
+    const resolved = parseSimpleType(source, registry);
+    registry.simpleTypes.set(name, resolved);
+    return clone(resolved);
+  } finally { registry.resolving.delete(name); }
+}
+
+function resolveDeclaredSimple(node: XmlRecord, name: string, registry: Registry): SimpleTypeDefinition {
+  const uri = expandedNamespace(name, node[SCHEMA_CONTEXT]?.namespaces ?? {}, false);
+  if (uri === XSD_NAMESPACE && BUILTIN_TYPES.has(localName(name))) return resolveBuiltinSimpleType(name);
+  return resolveNamedSimple(localName(name), registry);
 }

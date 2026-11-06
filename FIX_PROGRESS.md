@@ -71,3 +71,7 @@ Removed the parent-repository theme URL and unused host theme markers. Existing 
 ### Validation follow-up — nullable required groups
 
 Independent lxml comparisons exposed rejection of empty content for required groups whose children are optional. Matching now handles zero-consuming occurrences without an infinite loop, including repeated nullable groups. Added core regressions; the independent comparison now passes.
+
+### Validation follow-up — supported-schema symbol and grammar checks
+
+Simple types now resolve forward references with cycle detection. Builtin types remain distinct from same-local-name user types. Duplicate declarations, invalid declaration structure and widening enumeration restrictions fail compilation. Enumeration equality preserves decimal precision and floating infinity semantics. Added regressions and retained the explicit subset contract.
