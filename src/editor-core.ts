@@ -1845,3 +1845,7 @@ function annotateSchema(node: XmlRecord, tag: string, inherited: SchemaContext, 
 export function canAppendChild(root: ElementNode, schema: SchemaModel | null, nodeId: string, definition: ElementDefinition | string, pastedNode: ElementNode | null = null): boolean {
   return canInsertChild(root, schema, nodeId, definition, pastedNode);
 }
+
+export function getXmlSchemaReferences(root: ElementNode): string[] {
+  return gatherSchemaReferences({ ":@": Object.fromEntries(root.attributes.map((attribute) => [`@_${attribute.name}`, attribute.value])) });
+}

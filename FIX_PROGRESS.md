@@ -12,7 +12,7 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 | 6. Durable draft schema binding | Fixed | Cross-session embedded schema, legacy missing-schema and hostile-ID controller tests. |
 | 7. Edit invariants | Fixed | Required-child deletion, invalid paste and transactional controller rollback tests. |
 | 8. Resource limits | Fixed | Input/depth limits, strict occurrences, recursive scaffolding and bounded matching. |
-| 9. Schema lifecycle | Pending | |
+| 9. Schema lifecycle | Fixed | Remote registration, distinct URI identity and stale-schema/recompile controller tests. |
 | 10. Recovery and history | Pending | |
 | Additional: focus, rendering, CI, standalone theme | Pending | |
 
@@ -49,3 +49,7 @@ Inputs are limited to 1 MiB, 5,000 elements, 128 levels and 1,000 attributes per
 ### Fix 7 — validate edits as transactions
 
 All content-edit actions use a shared transaction boundary: snapshot, mutate, syntax/namespace check, full schema analysis, commit or rollback. Normal mode allows only placeholder problems; migration mode explicitly permits schema violations. Paste/delete/replacement suggestions use complete analysis. Child insertion offers positions before existing siblings as well as append. Scaffolding merges required children by matching names instead of child counts. Core and controller regressions cover the reported failures.
+
+### Fix 9 — explicit schema identity and compilation state
+
+Remote XSDs are compiled, registered and linked by full URI. Local references link only when an exact filename match is unique; remote paths never fall back to basenames. Registry entries carry revision/error state, and failed recompilation blocks dependents instead of silently validating against old models. Edited schema-location attributes are recomputed. Fetching has a timeout and bounded streaming. Multi-schema imports remain explicitly unsupported.

@@ -1,6 +1,7 @@
 import {
   analyzeDocument,
   INPUT_LIMIT,
+  getXmlSchemaReferences,
   canAppendChild,
   canInsertChild,
   removeNodeFromTree,
@@ -50,6 +51,9 @@ type DocumentMode = "edit" | "migration" | "freeform";
 type PaletteMode = "search" | "input" | "textarea";
 
 interface SchemaEntry {
+  referenceUri?: string | null;
+  revision?: number;
+  compileError?: string;
   id: string;
   title: string;
   fileName: string;
@@ -252,7 +256,8 @@ function getActiveDocument(): AppDocumentState | null {
 }
 
 function getSchemaForDocument(documentState: AppDocumentState | null): SchemaModel | null {
-  return documentState?.schemaId ? state.schemas.get(documentState.schemaId)?.model || null : null;
+  const entry = documentState?.schemaId ? state.schemas.get(documentState.schemaId) : null;
+  return entry && !entry.compileError ? entry.model : null;
 }
 
 function setNotice(message: string): void {
@@ -356,15 +361,14 @@ function getDocumentSchemaReferences(documentState: AppDocumentState): string[] 
   return [...references];
 }
 
+function referenceMatches(reference: string, fileName: string, referenceUri?: string | null): boolean {
+  if (referenceUri) return reference === referenceUri;
+  return !isHttpReference(reference) && !reference.includes("/") && !reference.includes("\\") && reference === fileName;
+}
+
 function findLoadedSchemaDocument(reference: string): AppDocumentState | null {
-  const expectedName = basename(reference);
-  return state.documents.find((documentState) =>
-    documentState.kind === "xsd"
-    && (
-      documentState.referenceUri === reference
-      || documentState.fileName === expectedName
-      || basename(documentState.fileName) === expectedName
-    )) || null;
+  const matches = state.documents.filter((doc) => doc.kind === "xsd" && referenceMatches(reference, doc.fileName, doc.referenceUri));
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function ensureWritable(documentState: AppDocumentState): boolean {
@@ -419,13 +423,21 @@ async function openSchemaReference(reference: string, baseReference?: string | n
 
   try {
     setNotice(`Loading schema "${resolvedReference}"...`);
-    const response = await fetch(resolvedReference);
+    const response = await fetch(resolvedReference, { signal: AbortSignal.timeout(15000) });
     if (!response.ok) {
       throw new Error(`Request failed with ${response.status}`);
     }
     if (Number(response.headers?.get("content-length") ?? 0) > INPUT_LIMIT) throw new Error("Schema exceeds the 1 MiB limit.");
     const xmlText = await readBoundedResponse(response);
-    addDocument(createReadonlySchemaDocument(resolvedReference, xmlText, resolvedReference));
+    const model = parseXmlSchema(xmlText);
+    const loaded = createSchemaDocument(basename(resolvedReference), xmlText, model);
+    loaded.readOnly = true;
+    loaded.referenceUri = resolvedReference;
+    loaded.title += " (readonly)";
+    const entry = state.schemas.get(loaded.schemaRegistrationId!)!;
+    entry.referenceUri = resolvedReference;
+    entry.documentId = loaded.id;
+    addDocument(loaded);
     setNotice(`Opened linked schema "${basename(resolvedReference)}" as read-only.`);
   } catch (error) {
     setNotice(`Could not load "${resolvedReference}": ${errorMessage(error)}`);
@@ -460,10 +472,13 @@ function relinkSchemaByReference(documentState: AppDocumentState): void {
 
   const candidates = getVisibleSchemas();
   for (const reference of documentState.schemaReferences) {
-    const expected = basename(reference);
-    const match = candidates.find((candidate) => candidate.fileName === expected);
+    const resolved = resolveSchemaReference(reference, documentState.referenceUri);
+    const matches = candidates.filter((candidate) => referenceMatches(resolved, candidate.fileName, candidate.referenceUri));
+    const match = matches.length === 1 ? matches[0] : null;
+    if (matches.length > 1) documentState.schemaError = `Ambiguous schema reference: ${reference}. Select a schema explicitly.`;
     if (match) {
       documentState.schemaId = match.id;
+      documentState.schemaError = undefined;
       return;
     }
   }
@@ -473,8 +488,11 @@ function syncDocumentValidation(documentState: AppDocumentState): void {
   const schema = getSchemaForDocument(documentState);
   documentState.analysis = analyzeDocument(documentState.root, schema);
   if (documentState.schemaRequired && !schema) {
-    documentState.analysis.problems.push({ code: ProblemCode.SchemaUnavailable, nodeId: documentState.root.id, message: documentState.schemaError || "Required schema is not loaded. Load it or explicitly detach schema validation." });
+    documentState.analysis.problems.push({ code: ProblemCode.SchemaUnavailable, nodeId: documentState.root.id, message: (documentState.schemaId ? state.schemas.get(documentState.schemaId)?.compileError : undefined) || documentState.schemaError || "Required schema is not loaded. Load it or explicitly detach schema validation." });
     documentState.mode = "migration";
+  }
+  if (documentState.kind === "xsd" && documentState.schemaError) {
+    documentState.analysis.problems.push({code: ProblemCode.SchemaUnavailable, nodeId: documentState.root.id, message: documentState.schemaError});
   }
   if (schema && (documentState.kind === "xml" || documentState.kind === "xsd")) {
     const hasSchemaErrors = documentState.analysis.problems.some((problem) => problem.code !== "placeholder");
@@ -495,23 +513,27 @@ function syncAllXmlDocumentsForSchema(schemaId: string): void {
 }
 
 function syncSchemaLibraryFromDocument(documentState: AppDocumentState): void {
-  if (documentState.kind !== "xsd" || !documentState.schemaRegistrationId) {
-    return;
-  }
-
+  if (documentState.kind !== "xsd" || !documentState.schemaRegistrationId) return;
+  const id = documentState.schemaRegistrationId;
+  let registered = state.schemas.get(id);
   try {
     const xml = serializeXml(documentState.root, null);
-    const schemaModel = parseXmlSchema(xml);
-    const registered = state.schemas.get(documentState.schemaRegistrationId || "");
+    const model = parseXmlSchema(xml);
     if (!registered) {
-      return;
+      registered = { id, title: documentState.title, fileName: documentState.fileName, model, sourceText: xml, documentId: documentState.id, referenceUri: documentState.referenceUri };
+      state.schemas.set(id, registered);
     }
-    registered.model = schemaModel;
+    registered.model = model;
     registered.sourceText = xml;
-    syncAllXmlDocumentsForSchema(registered.id);
-  } catch {
-    // Keep the previous schema model until the user resolves malformed edits.
+    registered.revision = (registered.revision ?? 0) + 1;
+    registered.compileError = undefined;
+    documentState.schemaError = undefined;
+  } catch (error) {
+    const message = `Schema compilation failed: ${errorMessage(error)}`;
+    if (registered) registered.compileError = message;
+    documentState.schemaError = message;
   }
+  syncAllXmlDocumentsForSchema(id);
 }
 
 function selectDocument(documentIdValue: string): void {
@@ -524,6 +546,7 @@ function selectDocument(documentIdValue: string): void {
 }
 
 function addDocument(documentState: AppDocumentState): void {
+  documentState.schemaRequired ??= Boolean(documentState.schemaId || documentState.schemaReferences.length);
   relinkSchemaByReference(documentState);
   syncDocumentValidation(documentState);
   state.documents.push(documentState);
@@ -612,7 +635,7 @@ function createDraftDocument(fileName: string, draftJson: string): AppDocumentSt
   if (loaded.schemaSource) {
     const model = parseXmlSchema(loaded.schemaSource.sourceText);
     schemaId = documentId("restored-schema");
-    state.schemas.set(schemaId, { id: schemaId, title: loaded.schemaSource.fileName, fileName: loaded.schemaSource.fileName, model, sourceText: loaded.schemaSource.sourceText, documentId: null });
+    state.schemas.set(schemaId, { id: schemaId, title: loaded.schemaSource.fileName, fileName: loaded.schemaSource.fileName, model, sourceText: loaded.schemaSource.sourceText, referenceUri: loaded.schemaSource.referenceUri, documentId: null });
   }
   let registrationId: string | null = null;
   if (loaded.kind === "xsd") {
@@ -731,8 +754,17 @@ function loadDemoWorkspace(): void {
 }
 
 function refreshDocument(documentState: AppDocumentState): void {
-  syncDocumentValidation(documentState);
+  if (documentState.kind === "xml") {
+    const references = getXmlSchemaReferences(documentState.root);
+    if (JSON.stringify(references) !== JSON.stringify(documentState.schemaReferences)) {
+      documentState.schemaReferences = references;
+      documentState.schemaId = null;
+      documentState.schemaRequired = references.length > 0;
+      relinkSchemaByReference(documentState);
+    }
+  }
   syncSchemaLibraryFromDocument(documentState);
+  syncDocumentValidation(documentState);
   render();
 }
 
@@ -1435,7 +1467,7 @@ function saveDraft(): void {
   const payload = exportDraftDocument({
     formatVersion: 1,
     schemaRequired: documentState.schemaRequired ?? Boolean(documentState.schemaId),
-    schemaSource: linked ? { fileName: linked.fileName, sourceText: linked.sourceText } : undefined,
+    schemaSource: linked && !linked.compileError ? { fileName: linked.fileName, sourceText: linked.sourceText, referenceUri: linked.referenceUri } : undefined,
     title: documentState.title,
     kind: documentState.kind,
     root: documentState.root,
@@ -2213,7 +2245,7 @@ ensureBuiltinSchemas();
 render();
 
 // Workspace operations are exported for adapters and controller integration tests.
-export { state, openDetectedDocument, createDraftDocument, addDocument, syncDocumentValidation, updateSchemaLink, saveDraft, exportCurrentDocument };
+export { openSchemaReference, refreshDocument, state, openDetectedDocument, createDraftDocument, addDocument, syncDocumentValidation, updateSchemaLink, saveDraft, exportCurrentDocument };
 
 async function readBoundedResponse(response: Response): Promise<string> {
   if (!response.body) {
