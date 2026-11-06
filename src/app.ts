@@ -3,6 +3,7 @@ import {
   analyzeDocument,
   addAttributeFromDefinition,
   INPUT_LIMIT,
+  DRAFT_INPUT_LIMIT,
   getXmlSchemaReferences,
   canAppendChild,
   canInsertChild,
@@ -159,6 +160,7 @@ type EditableValueTarget =
   | { kind: "text"; node: ElementNode };
 
 interface AppState {
+  recoveryError?: string;
   documents: AppDocumentState[];
   activeDocumentId: string | null;
   schemas: Map<string, SchemaEntry>;
@@ -1361,6 +1363,7 @@ function createFreeformXmlDocument(): void {
       return;
     }
     addDocument({
+      savedFingerprint: "unsaved-new-document",
       id: documentId("xml"),
       title: `${trimmed}.xml`,
       fileName: `${trimmed}.xml`,
@@ -1400,7 +1403,8 @@ function createSchemaGuidedXmlDocument(): void {
     onSelect: (option) => {
       const value = typeof option === "string" ? option : String(option.value || "");
       addDocument({
-        id: documentId("xml"),
+        savedFingerprint: "unsaved-new-document",
+      id: documentId("xml"),
         title: `${value}.xml`,
         fileName: `${value}.xml`,
         kind: "xml",
@@ -1426,6 +1430,7 @@ function createNewSchemaDocument(): void {
 </xs:schema>`;
   const schemaModel = parseXmlSchema(starterSchema);
   const documentState = createSchemaDocument("schema.xsd", starterSchema, schemaModel);
+  documentState.savedFingerprint = "unsaved-new-document";
   const registered = state.schemas.get(documentState.schemaRegistrationId || "");
   if (registered) {
     registered.documentId = documentState.id;
@@ -1496,7 +1501,7 @@ function exportCurrentDocument(): void {
 
 function handleFiles(files: FileList, processor: (fileName: string, text: string) => void): void {
   for (const file of Array.from(files)) {
-    if (file.size > INPUT_LIMIT) { setNotice("Input exceeds the 1 MiB limit."); continue; }
+    if (file.size > (/\.json$/i.test(file.name) ? DRAFT_INPUT_LIMIT : INPUT_LIMIT)) { setNotice("File exceeds the XML/draft input limit."); continue; }
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -1889,6 +1894,7 @@ function render(): void {
       </div>
       <div class="statusbar">
         <div>${escapeHtml(state.notice)}</div>
+        <div class="recovery-status" role="status">${escapeHtml(state.recoveryError || "")}</div>
         <div>${state.clipboard ? `Clipboard: ${escapeHtml(state.clipboard.name)}` : "Clipboard empty"}</div>
       </div>
       ${renderPalette()}
@@ -2371,9 +2377,13 @@ export function persistRecovery(): void {
     const storage = globalThis.localStorage;
     if (!storage) return;
     const payload = JSON.stringify({version:1, documents:state.documents.filter((doc) => !doc.readOnly).map((doc) => ({fileName:doc.fileName, draft:draftPayload(doc), dirty:hasUnsavedChanges(doc)}))});
-    if (payload.length > 4 * INPUT_LIMIT) throw new Error("Workspace exceeds the 4 MiB recovery limit; save documents to disk.");
+    if (new TextEncoder().encode(payload).byteLength > 16 * INPUT_LIMIT) throw new Error("Workspace exceeds the 16 MiB recovery limit; save documents to disk.");
+    for (const doc of state.documents.filter((doc) => !doc.readOnly)) exportDraftDocument(draftPayload(doc));
     storage.setItem(RECOVERY_KEY, payload);
-  } catch (error) { state.notice = `Recovery unavailable: ${errorMessage(error)} Save a draft to disk.`; }
+    state.recoveryError = undefined;
+  } catch (error) { state.recoveryError = `Recovery unavailable: ${errorMessage(error)} Save a draft to disk.`; }
+  const status = app.querySelector?.<HTMLElement>(".recovery-status");
+  if (status) status.textContent = state.recoveryError || "";
 }
 
 export function restoreRecovery(): void {
@@ -2383,7 +2393,7 @@ export function restoreRecovery(): void {
   try {
     const raw = globalThis.localStorage?.getItem(RECOVERY_KEY);
     if (!raw) return;
-    if (raw.length > 4 * INPUT_LIMIT) throw new Error("Recovery exceeds workspace limit.");
+    if (new TextEncoder().encode(raw).byteLength > 16 * INPUT_LIMIT) throw new Error("Recovery exceeds workspace limit.");
     const payload = JSON.parse(raw) as {version?: unknown; documents?: unknown};
     if (payload.version !== 1 || !Array.isArray(payload.documents) || payload.documents.length > 50) throw new Error("Invalid recovery format.");
     restoringRecovery = true;

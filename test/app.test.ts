@@ -9,6 +9,7 @@ const schemaText = '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:e
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", undefined);
+  app.state.recoveryError = undefined;
   app.state.documents = [];
   app.state.activeDocumentId = null;
   for (const key of app.state.schemas.keys()) if (key !== "builtin-xsd-subset-meta") app.state.schemas.delete(key);
@@ -115,5 +116,15 @@ describe("edit recovery", () => {
     app.restoreRecovery();
     expect(app.state.documents).toHaveLength(1);
     expect(app.state.documents[0].root.text).toBe("safe");
+  });
+});
+
+
+describe("persistent recovery errors", () => {
+  it("keeps quota failures separate from ordinary action notices", () => {
+    vi.stubGlobal("localStorage", {setItem:()=>{throw new Error("quota full");}});
+    app.openDetectedDocument("r.xml", '<r/>');
+    app.state.notice = "An ordinary later notice";
+    expect(app.state.recoveryError).toContain("quota full");
   });
 });

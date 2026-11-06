@@ -46,7 +46,7 @@ Version 1 drafts embed the selected schema source and an explicit schema require
 
 ### Fix 8 — bound parsing, matching and scaffolding
 
-Inputs are limited to 1 MiB, 5,000 elements, 128 levels and 1,000 attributes per element. Finite occurrence bounds are integers up to 1,000; required recursive scaffolds fail with a useful error rather than stack overflow. Matching has a 10,000-step budget per content model. File sizes are checked before reading; fetched bodies are streamed with a byte limit. Worker offloading remains optional within these explicit limits.
+XML inputs are limited to 1 MiB (drafts: 8 MiB), 5,000 elements, 128 levels and 1,000 attributes per element. Finite occurrence bounds are integers up to 1,000; required recursive scaffolds fail with a useful error rather than stack overflow. Matching has a 10,000-step budget per content model. File sizes are checked before reading; fetched bodies are streamed with a byte limit. Worker offloading remains optional within these explicit limits.
 
 ### Fix 7 — validate edits as transactions
 
@@ -79,3 +79,7 @@ Simple types now resolve forward references with cycle detection. Builtin types 
 ### Namespace/edit follow-up — qualified attribute creation
 
 Required and optional attribute insertion now allocates explicit namespace prefixes when the schema qualifies attributes. Scaffolds remain valid when child qualification differs from the root. Fully populated XSD edits are also compiled inside the transaction, so an unsupported type reference cannot silently leave normal edit mode. Added a qualified-attribute scaffold regression.
+
+### Recovery follow-up — durable error reporting and portable draft sizes
+
+Recovery failures now have a persistent status field that ordinary action notices cannot overwrite. New documents start dirty. Drafts allow 8 MiB to accommodate tree metadata plus embedded schemas, while XML remains limited to 1 MiB; generated drafts are checked against the same limit before saving. Recovery checks every stored draft and caps total content at 16 MiB, subject to browser quota. Added a storage-quota regression.

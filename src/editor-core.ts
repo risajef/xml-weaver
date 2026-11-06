@@ -422,6 +422,7 @@ function parseAttribute(node: XmlRecord, registry: Registry): AttributeDefinitio
 }
 
 export const INPUT_LIMIT = 1024 * 1024;
+export const DRAFT_INPUT_LIMIT = 8 * INPUT_LIMIT;
 const NODE_LIMIT = 5000;
 const DEPTH_LIMIT = 128;
 
@@ -1618,11 +1619,13 @@ export function renderSourceXml(root: ElementNode): string {
 }
 
 export function exportDraftDocument<T>(documentState: T): string {
-  return JSON.stringify(documentState, null, 2);
+  const serialized = JSON.stringify(documentState, null, 2);
+  assertInputLimit(serialized, DRAFT_INPUT_LIMIT);
+  return serialized;
 }
 
 export function importDraftDocument<T>(serialized: string): T {
-  assertInputLimit(serialized);
+  assertInputLimit(serialized, DRAFT_INPUT_LIMIT);
   const value: unknown = JSON.parse(serialized);
   if (!isRecord(value)) throw new Error("Draft must be an object.");
   if ("root" in value) validateDraftTree(value.root);
@@ -1729,8 +1732,8 @@ function assertXmlName(name: string): void {
   if (!XML_NAME.test(name)) throw new Error(`Invalid XML name: ${name}`);
 }
 
-export function assertInputLimit(text: string): void {
-  if (text.length > INPUT_LIMIT || new TextEncoder().encode(text).byteLength > INPUT_LIMIT) throw new Error("Input exceeds the 1 MiB limit.");
+export function assertInputLimit(text: string, limit = INPUT_LIMIT): void {
+  if (text.length > limit || new TextEncoder().encode(text).byteLength > limit) throw new Error(`Input exceeds the ${limit / INPUT_LIMIT} MiB limit.`);
 }
 
 function checkTreeLimits(root: ElementNode): void {
