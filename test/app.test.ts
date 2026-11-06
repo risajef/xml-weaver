@@ -8,6 +8,7 @@ const app = await import("../src/app");
 const schemaText = '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r" type="xs:int"/></xs:schema>';
 
 beforeEach(() => {
+  vi.stubGlobal("localStorage", undefined);
   app.state.documents = [];
   app.state.activeDocumentId = null;
   for (const key of app.state.schemas.keys()) if (key !== "builtin-xsd-subset-meta") app.state.schemas.delete(key);
@@ -77,5 +78,42 @@ describe("schema lifecycle", () => {
     xsd.root.children[0].attributes.find((attribute) => attribute.name === "type")!.value = "xs:int";
     app.refreshDocument(xsd);
     expect(doc.analysis.problems).toEqual([]);
+  });
+});
+
+
+describe("edit recovery", () => {
+  it("undoes/redoes edits and guards closing unsaved work", () => {
+    app.openDetectedDocument("r.xml", '<r>one</r>');
+    const doc = app.state.documents[0];
+    app.commitDocumentEdit(doc, () => { doc.root.text = "two"; });
+    expect(app.hasUnsavedChanges(doc)).toBe(true);
+    app.undoDocumentEdit();
+    expect(doc.root.text).toBe("one");
+    expect(app.hasUnsavedChanges(doc)).toBe(false);
+    app.undoDocumentEdit(true);
+    expect(doc.root.text).toBe("two");
+    vi.stubGlobal("confirm", vi.fn(() => false));
+    app.closeDocument(doc.id);
+    expect(app.state.documents).toHaveLength(1);
+    app.markSaved(doc);
+    expect(app.hasUnsavedChanges(doc)).toBe(false);
+  });
+  it("recovers validated drafts with schemas and dirty state", () => {
+    const saved = new Map<string,string>();
+    vi.stubGlobal("localStorage", {setItem:(key:string,value:string)=>saved.set(key,value),getItem:(key:string)=>saved.get(key)});
+    app.openDetectedDocument("r.xml", '<r>one</r>');
+    app.commitDocumentEdit(app.state.documents[0], () => { app.state.documents[0].root.text = "two"; });
+    app.state.documents=[];
+    app.restoreRecovery();
+    expect(app.state.documents[0].root.text).toBe("two");
+    expect(app.hasUnsavedChanges(app.state.documents[0])).toBe(true);
+  });
+  it("rejects malformed recovery atomically", () => {
+    app.openDetectedDocument("r.xml", '<r>safe</r>');
+    vi.stubGlobal("localStorage", {getItem:()=>JSON.stringify({version:1,documents:[{fileName:"bad",draft:{root:{}}}]})});
+    app.restoreRecovery();
+    expect(app.state.documents).toHaveLength(1);
+    expect(app.state.documents[0].root.text).toBe("safe");
   });
 });

@@ -1,3 +1,4 @@
+import { createHistory, recordEdit, traverseHistory, type History } from "./history";
 import {
   analyzeDocument,
   INPUT_LIMIT,
@@ -64,6 +65,8 @@ interface SchemaEntry {
 }
 
 interface AppDocumentState {
+  history?: History;
+  savedFingerprint?: string;
   schemaRequired?: boolean;
   schemaError?: string;
   id: string;
@@ -549,6 +552,8 @@ function addDocument(documentState: AppDocumentState): void {
   documentState.schemaRequired ??= Boolean(documentState.schemaId || documentState.schemaReferences.length);
   relinkSchemaByReference(documentState);
   syncDocumentValidation(documentState);
+  documentState.history ??= createHistory();
+  documentState.savedFingerprint ??= documentFingerprint(documentState);
   state.documents.push(documentState);
   if (documentState.kind === "xsd") {
     for (const existing of state.documents) {
@@ -559,6 +564,7 @@ function addDocument(documentState: AppDocumentState): void {
     }
   }
   state.activeDocumentId = documentState.id;
+  persistRecovery();
   render();
 }
 
@@ -1463,25 +1469,10 @@ function saveDraft(): void {
     return;
   }
 
-  const linked = documentState.schemaId ? state.schemas.get(documentState.schemaId) : null;
-  const payload = exportDraftDocument({
-    formatVersion: 1,
-    schemaRequired: documentState.schemaRequired ?? Boolean(documentState.schemaId),
-    schemaSource: linked && !linked.compileError ? { fileName: linked.fileName, sourceText: linked.sourceText, referenceUri: linked.referenceUri } : undefined,
-    title: documentState.title,
-    kind: documentState.kind,
-    root: documentState.root,
-    schemaId: documentState.schemaId,
-    schemaReferences: documentState.schemaReferences,
-    mode: documentState.mode,
-    readOnly: documentState.readOnly,
-    referenceUri: documentState.referenceUri || null,
-    selectedId: documentState.selectedId,
-    allowAutoLeaveMigration: documentState.allowAutoLeaveMigration,
-    schemaRegistrationId: documentState.schemaRegistrationId || null,
-  });
+  const payload = exportDraftDocument(draftPayload(documentState));
   const extension = documentState.mode === "migration" ? ".migration.json" : ".draft.json";
   downloadFile(`${basename(documentState.fileName)}${extension}`, payload, "application/json");
+  markSaved(documentState);
   setNotice("Saved the placeholder-aware draft representation.");
 }
 
@@ -1499,6 +1490,7 @@ function exportCurrentDocument(): void {
       ? basename(documentState.fileName).replace(/\.json$/i, ".xsd")
       : basename(documentState.fileName).replace(/(\.draft)?\.json$/i, ".xml");
     downloadFile(fileName, xml, "application/xml");
+    markSaved(documentState);
     setNotice(`Exported "${fileName}".`);
   } catch (error) {
     setNotice(errorMessage(error));
@@ -1526,6 +1518,8 @@ function closeDocument(documentIdValue: string): void {
     return;
   }
 
+  const closing = state.documents[index];
+  if (hasUnsavedChanges(closing) && !globalThis.confirm(`Close ${closing.title} and discard unsaved changes?`)) return;
   const [documentState] = state.documents.splice(index, 1);
   if (documentState.kind === "xsd" && documentState.schemaRegistrationId) {
     const schemaEntry = state.schemas.get(documentState.schemaRegistrationId);
@@ -1537,6 +1531,7 @@ function closeDocument(documentIdValue: string): void {
   if (state.activeDocumentId === documentIdValue) {
     state.activeDocumentId = state.documents[index]?.id || state.documents[index - 1]?.id || null;
   }
+  persistRecovery();
   render();
 }
 
@@ -1550,6 +1545,7 @@ function updateSchemaLink(schemaId: string): void {
   documentState.schemaRequired = Boolean(schemaId);
   documentState.mode = "edit";
   refreshDocument(documentState);
+  persistRecovery();
   setNotice(schemaId ? "Linked schema to the current document." : "Detached the schema from the current document.");
 }
 
@@ -1840,6 +1836,8 @@ function render(): void {
           <button data-action="load-demo">Load demo</button>
         </div>
         <div class="topbar-group">
+          <button data-action="undo" ${documentState?.history?.past.length ? "" : "disabled"}>Undo</button>
+          <button data-action="redo" ${documentState?.history?.future.length ? "" : "disabled"}>Redo</button>
           <button data-action="save-draft" ${documentState ? "" : "disabled"}>Save${renderShortcutHint("Ctrl+S")}</button>
           <button data-action="export" ${documentState ? "" : "disabled"}>Export${renderShortcutHint("Ctrl+E")}</button>
           <button data-action="view-source" ${documentState ? "" : "disabled"}>View source</button>
@@ -1862,7 +1860,7 @@ function render(): void {
         ${state.documents.map((entry) => `
           <button class="tab${entry.id === state.activeDocumentId ? " active" : ""}${entry.mode === "migration" ? " migration" : ""}" data-tab-id="${escapeHtml(entry.id)}">
             ${state.showShortcutHints ? `<span class="tab-shortcut">${state.documents.indexOf(entry) + 1}</span>` : ""}
-            ${escapeHtml(entry.title)}
+            ${escapeHtml(entry.title)}${hasUnsavedChanges(entry) ? " *" : ""}
             <span data-close-id="${escapeHtml(entry.id)}">x</span>
           </button>
         `).join("")}
@@ -1896,6 +1894,10 @@ function render(): void {
 }
 
 document.addEventListener("click", (event) => {
+  if (event.target instanceof Element) {
+    const action = event.target.closest<HTMLElement>("[data-action]")?.dataset.action;
+    if (action === "undo" || action === "redo") { undoDocumentEdit(action === "redo"); return; }
+  }
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
     return;
@@ -2130,6 +2132,11 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (event.ctrlKey || event.metaKey) {
+    if (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      undoDocumentEdit(event.shiftKey || event.key.toLowerCase() === "y");
+      return;
+    }
     if (event.key.toLowerCase() === "o") {
       event.preventDefault();
       document.querySelector<HTMLInputElement>("#document-input")?.click();
@@ -2245,7 +2252,7 @@ ensureBuiltinSchemas();
 render();
 
 // Workspace operations are exported for adapters and controller integration tests.
-export { openSchemaReference, refreshDocument, state, openDetectedDocument, createDraftDocument, addDocument, syncDocumentValidation, updateSchemaLink, saveDraft, exportCurrentDocument };
+export { closeDocument, openSchemaReference, refreshDocument, state, openDetectedDocument, createDraftDocument, addDocument, syncDocumentValidation, updateSchemaLink, saveDraft, exportCurrentDocument };
 
 async function readBoundedResponse(response: Response): Promise<string> {
   if (!response.body) {
@@ -2289,6 +2296,101 @@ export function commitDocumentEdit(documentState: AppDocumentState, mutate: () =
     setNotice(`Edit rejected: ${errorMessage(error)}`);
     return false;
   }
+  documentState.history ??= createHistory();
+  recordEdit(documentState.history, { root: previous, selectedId: selected });
   refreshDocument(documentState);
+  persistRecovery();
   return true;
 }
+
+function draftPayload(documentState: AppDocumentState): DraftDocumentPayload {
+  const linked = documentState.schemaId ? state.schemas.get(documentState.schemaId) : null;
+  return {
+    formatVersion: 1,
+    schemaRequired: documentState.schemaRequired ?? Boolean(documentState.schemaId),
+    schemaSource: linked && !linked.compileError ? { fileName: linked.fileName, sourceText: linked.sourceText, referenceUri: linked.referenceUri } : undefined,
+    title: documentState.title,
+    kind: documentState.kind,
+    root: documentState.root,
+    schemaId: documentState.schemaId,
+    schemaReferences: documentState.schemaReferences,
+    mode: documentState.mode,
+    readOnly: documentState.readOnly,
+    referenceUri: documentState.referenceUri || null,
+    selectedId: documentState.selectedId,
+    allowAutoLeaveMigration: documentState.allowAutoLeaveMigration,
+    schemaRegistrationId: documentState.schemaRegistrationId || null,
+  };
+}
+
+function documentFingerprint(doc: AppDocumentState): string {
+  return JSON.stringify({root: doc.root, schemaId: doc.schemaId, schemaRequired: doc.schemaRequired}, (key, value: unknown) => key === "collapsed" ? undefined : value);
+}
+export function hasUnsavedChanges(doc: AppDocumentState): boolean {
+  return !doc.readOnly && doc.savedFingerprint !== documentFingerprint(doc);
+}
+export function markSaved(doc: AppDocumentState): void {
+  doc.savedFingerprint = documentFingerprint(doc);
+  persistRecovery();
+}
+export function undoDocumentEdit(redo = false): void {
+  const doc = getActiveDocument();
+  if (!doc || !ensureWritable(doc) || !doc.history) return;
+  const snapshot = traverseHistory(doc.history, {root: cloneNodeTree(doc.root), selectedId: doc.selectedId}, redo);
+  if (!snapshot) return;
+  doc.root = snapshot.root;
+  doc.selectedId = snapshot.selectedId;
+  refreshDocument(doc);
+  persistRecovery();
+}
+
+const RECOVERY_KEY = "xml-weaver.workspace.v1";
+let restoringRecovery = false;
+export function persistRecovery(): void {
+  if (restoringRecovery) return;
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return;
+    const payload = JSON.stringify({version:1, documents:state.documents.filter((doc) => !doc.readOnly).map((doc) => ({fileName:doc.fileName, draft:draftPayload(doc), dirty:hasUnsavedChanges(doc)}))});
+    if (payload.length > 4 * INPUT_LIMIT) throw new Error("Workspace exceeds the 4 MiB recovery limit; save documents to disk.");
+    storage.setItem(RECOVERY_KEY, payload);
+  } catch (error) { state.notice = `Recovery unavailable: ${errorMessage(error)} Save a draft to disk.`; }
+}
+
+export function restoreRecovery(): void {
+  const previousDocuments = [...state.documents];
+  const previousSchemas = new Map(state.schemas);
+  const previousActive = state.activeDocumentId;
+  try {
+    const raw = globalThis.localStorage?.getItem(RECOVERY_KEY);
+    if (!raw) return;
+    if (raw.length > 4 * INPUT_LIMIT) throw new Error("Recovery exceeds workspace limit.");
+    const payload = JSON.parse(raw) as {version?: unknown; documents?: unknown};
+    if (payload.version !== 1 || !Array.isArray(payload.documents) || payload.documents.length > 50) throw new Error("Invalid recovery format.");
+    restoringRecovery = true;
+    // Validate every draft before inserting any document into the workspace.
+    const documents = payload.documents.map((entry: unknown) => {
+      if (!entry || typeof entry !== "object" || !("fileName" in entry) || typeof entry.fileName !== "string" || !("draft" in entry)) throw new Error("Invalid recovery document.");
+      const doc = createDraftDocument(entry.fileName, JSON.stringify(entry.draft));
+      if ("dirty" in entry && entry.dirty === true) doc.savedFingerprint = "unsaved-recovered-document";
+      return doc;
+    });
+    documents.forEach(addDocument);
+    state.notice = `Recovered ${documents.length} documents from this browser.`;
+  } catch (error) {
+    state.documents = previousDocuments;
+    state.schemas = previousSchemas;
+    state.activeDocumentId = previousActive;
+    state.notice = `Recovery could not be restored: ${errorMessage(error)}`;
+  } finally { restoringRecovery = false; }
+}
+
+globalThis.addEventListener?.("beforeunload", (event) => {
+  if (!state.documents.some(hasUnsavedChanges)) return;
+  persistRecovery();
+  event.preventDefault();
+  (event as BeforeUnloadEvent).returnValue = "";
+});
+
+restoreRecovery();
+render();

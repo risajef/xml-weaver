@@ -13,7 +13,7 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 | 7. Edit invariants | Fixed | Required-child deletion, invalid paste and transactional controller rollback tests. |
 | 8. Resource limits | Fixed | Input/depth limits, strict occurrences, recursive scaffolding and bounded matching. |
 | 9. Schema lifecycle | Fixed | Remote registration, distinct URI identity and stale-schema/recompile controller tests. |
-| 10. Recovery and history | Pending | |
+| 10. Recovery and history | Fixed | Undo/redo, dirty-close protection, validated browser recovery and corrupt-recovery tests. |
 | Additional: focus, rendering, CI, standalone theme | Pending | |
 
 ## Changes
@@ -53,3 +53,7 @@ All content-edit actions use a shared transaction boundary: snapshot, mutate, sy
 ### Fix 9 — explicit schema identity and compilation state
 
 Remote XSDs are compiled, registered and linked by full URI. Local references link only when an exact filename match is unique; remote paths never fall back to basenames. Registry entries carry revision/error state, and failed recompilation blocks dependents instead of silently validating against old models. Edited schema-location attributes are recomputed. Fetching has a timeout and bounded streaming. Multi-schema imports remain explicitly unsupported.
+
+### Fix 10 — history, dirty state and browser recovery
+
+Content transactions record bounded undo/redo snapshots (30 steps, approximately 4 MiB history per document). Tabs show unsaved state; closing dirty documents and leaving the page invoke browser protection. Save/export establishes a saved baseline. Editable documents are recovered through validated versioned drafts in localStorage, with atomic rollback on corrupt recovery. Storage failure is reported and disk saving remains available. Recovery is local to this browser and origin; it is not cloud storage.
