@@ -811,7 +811,7 @@ function enumerateMatches(
     return [{ index, assignments: [] }];
   }
 
-  const max = Number.isFinite(particle.maxOccurs) ? particle.maxOccurs : children.length + 1;
+  const max = Number.isFinite(particle.maxOccurs) ? particle.maxOccurs : Math.max(particle.minOccurs, children.length + 1);
   const results: MatchResult[] = [];
   const singleParticle = { ...particle, minOccurs: 1, maxOccurs: 1 } as Particle;
 
@@ -827,6 +827,7 @@ function enumerateMatches(
     if (++budget.steps > 10000) throw new Error("Schema matching exceeds work limit. Simplify ambiguous content or split the document.");
     for (const singleResult of enumerateSingleMatch(schema, singleParticle, children, currentIndex, budget)) {
       if (singleResult.index === currentIndex) {
+        if (count < particle.minOccurs) visit(currentIndex, particle.minOccurs, assignments.concat(singleResult.assignments));
         continue;
       }
 

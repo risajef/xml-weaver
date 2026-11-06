@@ -380,3 +380,12 @@ describe("complete edit validation", () => {
     expect(canAppendChild(root, s, root.id, "a", parseXmlString('<a>invalid</a>').root)).toBe(false);
   });
 });
+
+
+describe("nullable content groups", () => {
+  it("allows required groups whose children are optional", () => {
+    const s = parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r"><xs:complexType><xs:sequence minOccurs="2" maxOccurs="2"><xs:element name="a" type="xs:string" minOccurs="0"/></xs:sequence></xs:complexType></xs:element></xs:schema>');
+    expect(analyzeDocument(parseXmlString('<r/>').root,s).problems).toEqual([]);
+    expect(analyzeDocument(parseXmlString('<r><a>x</a></r>').root,s).problems).toEqual([]);
+  });
+});

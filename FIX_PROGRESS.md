@@ -67,3 +67,7 @@ Full renders restore the active palette input/caret or toolbar control. Native t
 ### Additional fix — standalone styling
 
 Removed the parent-repository theme URL and unused host theme markers. Existing local CSS supplies the application appearance, including an explicit panel-blur fallback. No parent page or asset was modified.
+
+### Validation follow-up — nullable required groups
+
+Independent lxml comparisons exposed rejection of empty content for required groups whose children are optional. Matching now handles zero-consuming occurrences without an infinite loop, including repeated nullable groups. Added core regressions; the independent comparison now passes.
