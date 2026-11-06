@@ -16,7 +16,7 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 | 10. Recovery and history | Fixed | Undo/redo, dirty-close protection, validated browser recovery and corrupt-recovery tests. |
 | Additional: focus and rendering | Fixed | Preserve input/caret and native controls; count problems once and update notices locally. |
 | Additional: standalone theme | Fixed | Removed implicit parent stylesheet; local CSS owns all variables. |
-| Additional: CI/conformance/browser tests | Pending | |
+| Additional: CI/conformance/browser tests | Fixed | 71 tests, strict production build, independent lxml comparisons and Chromium downloads/focus/recovery checks pass. |
 
 ## Changes
 
@@ -87,3 +87,19 @@ Recovery failures now have a persistent status field that ordinary action notice
 ### Validation follow-up — mixed tail text and bounded type resolution
 
 Element-only content now rejects non-whitespace text after child elements, not just leading text. Reserved namespace bindings are checked even if unused, and forward simple-type resolution has a depth limit. UI event dispatch surfaces parser/work-budget exceptions as notices instead of uncaught browser errors. Added tail-text and reserved-binding regressions.
+
+### Additional fix — automated regression gates
+
+Added a subrepository CI workflow for Node 24, unit/controller tests, strict production build, independent Python/lxml schema comparisons and Chromium smoke checks. Puppeteer is a declared development dependency with a committed lockfile. Browser checks exercise real imports, hostile drafts, search focus, native selects, transactions, history, browser recovery and downloaded draft/XML content. These checks passed locally; the GitHub workflow has not been run remotely because no changes were pushed.
+
+## Final verification
+
+- `npm test`: 71 tests passed (61 core, 10 controller).
+- `npm run build -- --outDir /tmp/xml-weaver-final-dist`: passed, with no missing parent-theme dependency.
+- `npm run test:conformance`: passed against lxml 6.0.2, including final XML and XSD output.
+- `node scripts/browser-smoke.mjs`: passed in Chromium; localhost/browser sockets required execution outside the restricted sandbox.
+- No application source, publication output or Git commit was changed in the parent website repository. Its submodule pointer is deliberately left uncommitted. No changes were pushed.
+
+## Deliberate support boundaries
+
+This remains a single-schema XSD-subset editor, not a full XSD processor. Unsupported facets/imports/includes, comments, non-declaration processing instructions and DTDs fail explicitly. Mixed text round-trips, but the current tree control edits leading text while preserving tails. Input/work limits are documented in the README. Browser recovery is subject to storage quota, with a persistent error when unavailable. Worker offloading and a larger module decomposition are future improvements rather than prerequisites within the enforced limits.

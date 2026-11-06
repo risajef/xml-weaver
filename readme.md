@@ -39,3 +39,7 @@ Resource limits: 1 MiB XML input, 8 MiB draft input, 5,000 elements, 128 levels,
 ## Recovery
 
 Undo/redo: Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl+Y). Unsaved tabs show an asterisk. Editable workspaces are stored locally in this browser for crash/reload recovery, up to 16 MiB (subject to browser storage quota); failures are reported. Use Save for a portable draft, including its schema, or Export for validated XML. Browser recovery contains document content, so clear site storage when using a shared browser.
+
+## Regression checks
+
+Node 22.12+ is required (CI uses Node 24). `npm ci` installs the browser-test dependency and its Chromium. Run `npm test`, `npm run build`, and `npm run test:browser`. Independent schema comparisons use `npm run test:conformance` and require Python 3 with lxml (`python3 -m pip install lxml==6.0.2`). CI runs all four commands. Browser tests cover imports, injection protection, keyboard focus, transactions, undo/redo, reload recovery and actual downloads.
