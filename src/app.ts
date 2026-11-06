@@ -1911,7 +1911,7 @@ function render(): void {
   }
 }
 
-document.addEventListener("click", (event) => {
+onUiEvent("click", (event) => {
   if (event.target instanceof Element) {
     const action = event.target.closest<HTMLElement>("[data-action]")?.dataset.action;
     if (action === "undo" || action === "redo") { undoDocumentEdit(action === "redo"); return; }
@@ -2054,7 +2054,7 @@ document.addEventListener("click", (event) => {
   }
 });
 
-document.addEventListener("change", (event) => {
+onUiEvent("change", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
     return;
@@ -2076,7 +2076,7 @@ document.addEventListener("change", (event) => {
   }
 });
 
-document.addEventListener("input", (event) => {
+onUiEvent("input", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement) || !state.palette) {
     return;
@@ -2102,7 +2102,7 @@ document.addEventListener("input", (event) => {
   }
 });
 
-document.addEventListener("keydown", (event) => {
+onUiEvent("keydown", (event) => {
   const activeElement = document.activeElement;
   if (!state.palette && (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement || activeElement instanceof HTMLSelectElement || (activeElement instanceof HTMLElement && activeElement.isContentEditable))) return;
   if (state.sourceViewer) {
@@ -2423,3 +2423,9 @@ globalThis.addEventListener?.("beforeunload", (event) => {
 
 restoreRecovery();
 render();
+
+function onUiEvent<K extends keyof DocumentEventMap>(type: K, handler: (event: DocumentEventMap[K]) => void): void {
+  document.addEventListener(type, (event) => {
+    try { handler(event); } catch (error) { setNotice(errorMessage(error)); }
+  });
+}

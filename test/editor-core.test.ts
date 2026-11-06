@@ -415,3 +415,15 @@ describe("qualified attribute scaffolding", () => {
     expect(analyzeDocument(root,s).problems).toEqual([]);
   });
 });
+
+
+describe("tail text validation", () => {
+  it("rejects mixed tail text in element-only content", () => {
+    const s = parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r"><xs:complexType><xs:sequence><xs:element name="a" type="xs:string"/></xs:sequence></xs:complexType></xs:element></xs:schema>');
+    expect(() => serializeXml(parseXmlString('<r><a>x</a>unexpected</r>').root,s)).toThrow();
+  });
+  it("rejects reserved namespace rebinding even when unused", () => {
+    expect(() => parseXmlString('<r xmlns:p="http://www.w3.org/XML/1998/namespace"/>')).toThrow("binding");
+    expect(() => parseXmlString('<r xmlns:p=""/>')).toThrow("binding");
+  });
+});

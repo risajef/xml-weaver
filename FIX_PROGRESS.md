@@ -83,3 +83,7 @@ Required and optional attribute insertion now allocates explicit namespace prefi
 ### Recovery follow-up — durable error reporting and portable draft sizes
 
 Recovery failures now have a persistent status field that ordinary action notices cannot overwrite. New documents start dirty. Drafts allow 8 MiB to accommodate tree metadata plus embedded schemas, while XML remains limited to 1 MiB; generated drafts are checked against the same limit before saving. Recovery checks every stored draft and caps total content at 16 MiB, subject to browser quota. Added a storage-quota regression.
+
+### Validation follow-up — mixed tail text and bounded type resolution
+
+Element-only content now rejects non-whitespace text after child elements, not just leading text. Reserved namespace bindings are checked even if unused, and forward simple-type resolution has a depth limit. UI event dispatch surfaces parser/work-budget exceptions as notices instead of uncaught browser errors. Added tail-text and reserved-binding regressions.

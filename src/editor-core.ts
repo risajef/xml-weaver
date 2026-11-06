@@ -1041,7 +1041,7 @@ function collectProblemsForNode(
         });
       }
     }
-  } else if (node.text.trim()) {
+  } else if (node.text.trim() || node.children.some((child) => child.tail?.trim())) {
     problems.push({
       code: ProblemCode.UnexpectedText,
       nodeId: node.id,
@@ -1852,6 +1852,7 @@ function nodeNamespaces(node: ElementNode, inherited: Record<string, string>): R
     else if (attribute.name.startsWith("xmlns:")) bindings[attribute.name.slice(6)] = attribute.value;
   }
   if (bindings.xml !== undefined && bindings.xml !== "http://www.w3.org/XML/1998/namespace") throw new Error("Invalid xml namespace binding.");
+  if (Object.entries(bindings).some(([prefix, uri]) => (prefix !== "xml" && uri === "http://www.w3.org/XML/1998/namespace") || (prefix !== "" && uri === ""))) throw new Error("Invalid reserved or empty namespace binding.");
   if (bindings.xmlns !== undefined || Object.values(bindings).includes("http://www.w3.org/2000/xmlns/")) throw new Error("Invalid xmlns binding.");
   return bindings;
 }
@@ -1914,6 +1915,7 @@ function resolveNamedSimple(name: string, registry: Registry): SimpleTypeDefinit
   if (existing) return clone(existing);
   const source = registry.simpleSources.get(name);
   if (!source) throw new Error(`Unsupported or unresolved type: ${name}`);
+  if (registry.resolving.size >= DEPTH_LIMIT) throw new Error("Simple type resolution exceeds depth limit.");
   if (registry.resolving.has(name)) throw new Error(`Cyclic simple type: ${name}`);
   registry.resolving.add(name);
   try {
