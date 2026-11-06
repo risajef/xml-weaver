@@ -2,6 +2,8 @@ import {
   analyzeDocument,
   INPUT_LIMIT,
   canAppendChild,
+  canInsertChild,
+  removeNodeFromTree,
   canDeleteAttribute,
   canDeleteNode,
   cloneNodeTree,
@@ -95,6 +97,7 @@ interface DraftDocumentPayload {
 }
 
 interface SearchPaletteOption extends FuzzyOption {
+  insertionIndex?: number;
   value?: string;
   elementDef?: ElementDefinition | null;
   attributeDef?: AttributeDefinition | null;
@@ -848,6 +851,7 @@ function updateNodeName(
   name: string,
   elementDef: ElementDefinition | null = null,
 ): void {
+  commitDocumentEdit(documentState, () => {
   node.name = name;
   node.placeholder = false;
   node.allowedNames = [];
@@ -860,7 +864,7 @@ function updateNodeName(
     }
   }
 
-  refreshDocument(documentState);
+  });
 }
 
 function openReplaceNodePalette(initialQuery = ""): void {
@@ -932,20 +936,21 @@ function openInsertChildPalette(): void {
       if (!trimmed) {
         return;
       }
-      targetNode.children.push(createElementNode(trimmed));
-      refreshDocument(documentState);
+      if (!commitDocumentEdit(documentState, () => { targetNode.children.push(createElementNode(trimmed)); })) return;
       setNotice(`Inserted "${trimmed}".`);
     }, { placeholder: "Child element name" });
     return;
   }
 
   const options = getAllowedChildDefinitions(documentState.root, schema, targetNode.id)
-    .filter((definition) => canAppendChild(documentState.root, schema, targetNode.id, definition))
-    .map((definition) => ({
-      label: definition.name,
+    .flatMap((definition) => Array.from({ length: targetNode.children.length + 1 }, (_, insertionIndex) => ({ definition, insertionIndex })))
+    .filter(({definition, insertionIndex}) => documentState.mode === "migration" || canInsertChild(documentState.root, schema, targetNode.id, definition, null, insertionIndex))
+    .map(({definition, insertionIndex}) => ({
+      label: `${definition.name} ${insertionIndex < targetNode.children.length ? "before " + targetNode.children[insertionIndex].name : "at end"}`,
       detail: definition.typeName || definition.refName || "element",
       value: definition.name,
       elementDef: definition,
+      insertionIndex,
     }));
 
   if (!options.length) {
@@ -963,9 +968,10 @@ function openInsertChildPalette(): void {
         return;
       }
       const newNode = createMinimalNodeFromDefinition(schema, selectedOption.elementDef);
-      targetNode.children.push(newNode);
-      documentState.selectedId = newNode.id;
-      refreshDocument(documentState);
+      if (!commitDocumentEdit(documentState, () => {
+        targetNode.children.splice(selectedOption.insertionIndex ?? targetNode.children.length, 0, newNode);
+        documentState.selectedId = newNode.id;
+      })) return;
       setNotice(`Inserted child "${selectedOption.value}".`);
     },
   });
@@ -987,14 +993,13 @@ function openInsertAttributePalette(): void {
       if (!trimmed) {
         return;
       }
-      targetNode.attributes.push({
+      if (!commitDocumentEdit(documentState, () => { targetNode.attributes.push({
         id: `attr-${crypto.randomUUID()}`,
         name: trimmed,
         value: "",
         placeholder: true,
         expectedValues: [],
-      });
-      refreshDocument(documentState);
+      }); })) return;
       setNotice(`Inserted attribute "${trimmed}".`);
     }, { placeholder: "Attribute name" });
     return;
@@ -1027,14 +1032,13 @@ function openInsertAttributePalette(): void {
       if (!definition) {
         return;
       }
-      targetNode.attributes.push({
+      if (!commitDocumentEdit(documentState, () => { targetNode.attributes.push({
         id: `attr-${crypto.randomUUID()}`,
         name: definition.name,
         value: "",
         placeholder: true,
         expectedValues: definition.valueType?.enumerations || [],
-      });
-      refreshDocument(documentState);
+      }); })) return;
       setNotice(`Inserted attribute "${definition.name}".`);
     },
   });
@@ -1050,22 +1054,24 @@ function deleteSelection(): void {
   const schema = getSchemaForDocument(documentState);
 
   if (selection.kind === "attribute") {
-    if (schema && !canDeleteAttribute(documentState.root, schema, selection.node.id, selection.attribute.id)) {
+    if (schema && documentState.mode !== "migration" && !canDeleteAttribute(documentState.root, schema, selection.node.id, selection.attribute.id)) {
       setNotice("This attribute is required by the schema and cannot be deleted.");
       return;
     }
 
-    selection.node.attributes = selection.node.attributes.filter((attribute) => attribute.id !== selection.attribute.id);
-    documentState.selectedId = selection.node.id;
-    refreshDocument(documentState);
+    if (!commitDocumentEdit(documentState, () => {
+      selection.node.attributes = selection.node.attributes.filter((attribute) => attribute.id !== selection.attribute.id);
+      documentState.selectedId = selection.node.id;
+    })) return;
     setNotice(`Deleted attribute "${selection.attribute.name}".`);
     return;
   }
 
   if (selection.kind === "text") {
-    selection.node.text = "";
-    selection.node.textPlaceholder = true;
-    refreshDocument(documentState);
+    if (!commitDocumentEdit(documentState, () => {
+      selection.node.text = "";
+      selection.node.textPlaceholder = true;
+    })) return;
     setNotice(`Cleared the value of "${selection.node.name}".`);
     return;
   }
@@ -1075,7 +1081,7 @@ function deleteSelection(): void {
     return;
   }
 
-  if (schema && !canDeleteNode(documentState.root, schema, selection.node.id)) {
+  if (schema && documentState.mode !== "migration" && !canDeleteNode(documentState.root, schema, selection.node.id)) {
     setNotice("Deleting this subtree would violate the schema.");
     return;
   }
@@ -1084,15 +1090,10 @@ function deleteSelection(): void {
   const currentIndex = visibleItems.findIndex((item) => item.id === documentState.selectedId);
   const fallbackId = visibleItems[Math.max(currentIndex - 1, 0)]?.id || documentState.root.id;
 
-  const removeNode = (node: ElementNode, targetId: string): void => {
-    node.children = node.children.filter((child) => child.id !== targetId);
-    for (const child of node.children) {
-      removeNode(child, targetId);
-    }
-  };
-  removeNode(documentState.root, selection.node.id);
-  documentState.selectedId = fallbackId;
-  refreshDocument(documentState);
+  if (!commitDocumentEdit(documentState, () => {
+    documentState.root = removeNodeFromTree(documentState.root, selection.node.id);
+    documentState.selectedId = fallbackId;
+  })) return;
   setNotice(`Deleted "${selection.node.name}".`);
 }
 
@@ -1129,9 +1130,10 @@ function pasteClipboard(): void {
     return;
   }
 
-  targetNode.children.push(pastedNode);
-  documentState.selectedId = pastedNode.id;
-  refreshDocument(documentState);
+  if (!commitDocumentEdit(documentState, () => {
+    targetNode.children.push(pastedNode);
+    documentState.selectedId = pastedNode.id;
+  })) return;
   setNotice(`Pasted "${pastedNode.name}".`);
 }
 
@@ -1144,9 +1146,10 @@ function openAttributeEditor(
     return;
   }
   const applyAttributeValue = (value: string): void => {
-    target.attribute.value = value;
-    target.attribute.placeholder = false;
-    refreshDocument(documentState);
+    if (!commitDocumentEdit(documentState, () => {
+      target.attribute.value = value;
+      target.attribute.placeholder = false;
+    })) return;
     const issues = documentState.analysis.problems.filter((problem) => problem.attrId === target.attribute.id);
     setNotice(issues.length ? issues[0].message : `Updated "${target.attribute.name}".`);
   };
@@ -1205,9 +1208,10 @@ function editCurrentValue(): void {
   }
 
   openInputPalette(`Edit value for ${target.node.name}`, target.node.text || "", (value) => {
-    target.node.text = value;
-    target.node.textPlaceholder = false;
-    refreshDocument(documentState);
+    if (!commitDocumentEdit(documentState, () => {
+      target.node.text = value;
+      target.node.textPlaceholder = false;
+    })) return;
     const issues = documentState.analysis.problems.filter((problem) => problem.nodeId === target.node.id && problem.code === "invalid-text");
     setNotice(issues.length ? issues[0].message : `Updated value for "${target.node.name}".`);
   }, {
@@ -2233,4 +2237,26 @@ async function readBoundedResponse(response: Response): Promise<string> {
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   return new TextDecoder().decode(bytes);
+}
+
+export function commitDocumentEdit(documentState: AppDocumentState, mutate: () => void): boolean {
+  if (!ensureWritable(documentState)) return false;
+  const previous = cloneNodeTree(documentState.root);
+  const selected = documentState.selectedId;
+  try {
+    mutate();
+    parseXmlString(renderSourceXml(documentState.root));
+    const analysis = analyzeDocument(documentState.root, getSchemaForDocument(documentState));
+    if (documentState.mode !== "migration") {
+      const error = analysis.problems.find((problem) => problem.code !== ProblemCode.Placeholder);
+      if (error) throw new Error(error.message);
+    }
+  } catch (error) {
+    documentState.root = previous;
+    documentState.selectedId = selected;
+    setNotice(`Edit rejected: ${errorMessage(error)}`);
+    return false;
+  }
+  refreshDocument(documentState);
+  return true;
 }

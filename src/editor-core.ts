@@ -1431,9 +1431,11 @@ export function fillRequiredScaffolding(node: ElementNode, schema: SchemaModel, 
 
     if (type.content) {
       const minimalChildren = createMinimalChildrenForParticle(schema, type.content);
-      const missingCount = Math.max(minimalChildren.length - node.children.length, 0);
-      if (missingCount > 0) {
-        node.children.push(...minimalChildren.slice(-missingCount));
+      let cursor = 0;
+      for (const required of minimalChildren) {
+        const match = node.children.findIndex((child, index) => index >= cursor && (required.placeholder ? required.allowedNames.includes(child.name) : child.name === required.name));
+        if (match >= 0) cursor = match + 1;
+        else { node.children.splice(cursor, 0, required); cursor++; }
       }
     }
   }
@@ -1473,23 +1475,11 @@ export function getReplacementCandidates(
   for (const elementDef of uniqueDefinitions) {
     const name = elementDef.name;
     if (mode !== ReplacementMode.Migration) {
-      const probeRoot = replaceNodeInTree(root, nodeId, (current) => ({ ...current, name, placeholder: false, allowedNames: [] }));
-      const probeAnalysis = analyzeDocument(probeRoot, schema);
-      const probeProblems = probeAnalysis.problems.filter((problem) =>
-        problem.nodeId === nodeId || probeAnalysis.nodeInfoById.get(problem.nodeId)?.parentId === nodeId,
-      );
-      const disqualifying = probeProblems.some((problem) =>
-        [
-          ProblemCode.UnexpectedChild,
-          ProblemCode.UnexpectedAttribute,
-          ProblemCode.InvalidAttributeValue,
-          ProblemCode.InvalidText,
-          ProblemCode.UnknownElement,
-        ].includes(problem.code),
-      );
-      if (disqualifying) {
-        continue;
-      }
+      let probeRoot: ElementNode;
+      try {
+        probeRoot = replaceNodeInTree(root, nodeId, (current) => fillRequiredScaffolding({ ...current, name, placeholder: false, allowedNames: [] }, schema, elementDef));
+        if (analyzeDocument(probeRoot, schema).problems.some((problem) => problem.code !== ProblemCode.Placeholder)) continue;
+      } catch { continue; }
     }
 
     const type = resolveType(schema, elementDef);
@@ -1520,7 +1510,7 @@ export function canDeleteNode(root: ElementNode, schema: SchemaModel | null, nod
 
   const nextRoot = removeNodeFromTree(root, nodeId);
   const nextAnalysis = analyzeDocument(nextRoot, schema);
-  return !nextAnalysis.problems.some((problem) => problem.nodeId === info.parentId && problem.code === ProblemCode.MissingRequiredChild);
+  return !nextAnalysis.problems.some((problem) => problem.code !== ProblemCode.Placeholder);
 }
 
 export function canDeleteAttribute(root: ElementNode, schema: SchemaModel | null, nodeId: string, attributeId: string): boolean {
@@ -1540,12 +1530,13 @@ export function canDeleteAttribute(root: ElementNode, schema: SchemaModel | null
   return attributeDef?.use !== AttributeUse.Required;
 }
 
-export function canAppendChild(
+export function canInsertChild(
   root: ElementNode,
   schema: SchemaModel | null,
   nodeId: string,
   childDefinitionOrName: ElementDefinition | string,
   pastedNode: ElementNode | null = null,
+  insertionIndex?: number,
 ): boolean {
   const lookup = findNodeById(root, nodeId);
   if (!lookup || "kind" in lookup) {
@@ -1566,10 +1557,10 @@ export function canAppendChild(
   const childNode = pastedNode ? clone(pastedNode) : createMinimalNodeForElement(schema, childDefinition ?? null);
   const probeRoot = replaceNodeInTree(root, nodeId, (current) => ({
     ...current,
-    children: current.children.concat(childNode),
+    children: [...current.children.slice(0, insertionIndex ?? current.children.length), childNode, ...current.children.slice(insertionIndex ?? current.children.length)],
   }));
   const probeAnalysis = analyzeDocument(probeRoot, schema);
-  return !probeAnalysis.problems.some((problem) => problem.code === ProblemCode.UnexpectedChild && problem.nodeId === childNode.id);
+  return !probeAnalysis.problems.some((problem) => problem.code !== ProblemCode.Placeholder);
 }
 
 function escapeXml(value: string, attribute = false): string {
@@ -1849,4 +1840,8 @@ function annotateSchema(node: XmlRecord, tag: string, inherited: SchemaContext, 
     if (name === "#text") continue;
     if (isRecord(value)) annotateSchema(value, localName(name), { ...context, global: tag === "schema" }, name);
   }
+}
+
+export function canAppendChild(root: ElementNode, schema: SchemaModel | null, nodeId: string, definition: ElementDefinition | string, pastedNode: ElementNode | null = null): boolean {
+  return canInsertChild(root, schema, nodeId, definition, pastedNode);
 }

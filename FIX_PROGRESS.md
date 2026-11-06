@@ -10,7 +10,7 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 | 4. Syntax and schema validation | Fixed | Malformed XML, final export, numeric lexical/range checks and unsupported schema regressions. |
 | 5. Namespace validation | Fixed | Namespace URI matching, qualified scaffolds, alternate xsi prefix and unbound-prefix tests. |
 | 6. Durable draft schema binding | Fixed | Cross-session embedded schema, legacy missing-schema and hostile-ID controller tests. |
-| 7. Edit invariants | Pending | |
+| 7. Edit invariants | Fixed | Required-child deletion, invalid paste and transactional controller rollback tests. |
 | 8. Resource limits | Fixed | Input/depth limits, strict occurrences, recursive scaffolding and bounded matching. |
 | 9. Schema lifecycle | Pending | |
 | 10. Recovery and history | Pending | |
@@ -45,3 +45,7 @@ Version 1 drafts embed the selected schema source and an explicit schema require
 ### Fix 8 — bound parsing, matching and scaffolding
 
 Inputs are limited to 1 MiB, 5,000 elements, 128 levels and 1,000 attributes per element. Finite occurrence bounds are integers up to 1,000; required recursive scaffolds fail with a useful error rather than stack overflow. Matching has a 10,000-step budget per content model. File sizes are checked before reading; fetched bodies are streamed with a byte limit. Worker offloading remains optional within these explicit limits.
+
+### Fix 7 — validate edits as transactions
+
+All content-edit actions use a shared transaction boundary: snapshot, mutate, syntax/namespace check, full schema analysis, commit or rollback. Normal mode allows only placeholder problems; migration mode explicitly permits schema violations. Paste/delete/replacement suggestions use complete analysis. Child insertion offers positions before existing siblings as well as append. Scaffolding merges required children by matching names instead of child counts. Core and controller regressions cover the reported failures.

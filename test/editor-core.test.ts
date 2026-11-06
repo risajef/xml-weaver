@@ -366,3 +366,17 @@ describe("resource budgets", () => {
     expect(() => parseXmlString('<r>'.repeat(200) + '</r>'.repeat(200))).toThrow("limits");
   });
 });
+
+
+describe("complete edit validation", () => {
+  it("prevents deleting required children even when an optional sibling remains", () => {
+    const s = parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r"><xs:complexType><xs:sequence><xs:element name="a" type="xs:string" minOccurs="0"/><xs:element name="b" type="xs:string"/></xs:sequence></xs:complexType></xs:element></xs:schema>');
+    const root = parseXmlString('<r><a>x</a><b>y</b></r>').root;
+    expect(canDeleteNode(root, s, root.children[1].id)).toBe(false);
+  });
+  it("checks values inside pasted descendants", () => {
+    const s = parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r"><xs:complexType><xs:sequence><xs:element name="a" type="xs:int" minOccurs="0" maxOccurs="unbounded"/></xs:sequence></xs:complexType></xs:element></xs:schema>');
+    const root = parseXmlString('<r/>').root;
+    expect(canAppendChild(root, s, root.id, "a", parseXmlString('<a>invalid</a>').root)).toBe(false);
+  });
+});
