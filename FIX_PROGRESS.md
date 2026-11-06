@@ -15,7 +15,7 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 | 9. Schema lifecycle | Fixed | Remote registration, distinct URI identity and stale-schema/recompile controller tests. |
 | 10. Recovery and history | Fixed | Undo/redo, dirty-close protection, validated browser recovery and corrupt-recovery tests. |
 | Additional: focus and rendering | Fixed | Preserve input/caret and native controls; count problems once and update notices locally. |
-| Additional: standalone theme | Pending | |
+| Additional: standalone theme | Fixed | Removed implicit parent stylesheet; local CSS owns all variables. |
 | Additional: CI/conformance/browser tests | Pending | |
 
 ## Changes
@@ -63,3 +63,7 @@ Content transactions record bounded undo/redo snapshots (30 steps, approximately
 ### Additional fix — preserve focus and reduce repeated rendering
 
 Full renders restore the active palette input/caret or toolbar control. Native text/select controls keep their keyboard behavior outside palettes. Source-viewer shortcuts are isolated. Notices update their DOM region without rebuilding the tree, and per-node problem counts are computed once per render. Palette action errors surface as notices; rejected rename notices are no longer overwritten by success text. Browser interaction checks are included in the final validation stage.
+
+### Additional fix — standalone styling
+
+Removed the parent-repository theme URL and unused host theme markers. Existing local CSS supplies the application appearance, including an explicit panel-blur fallback. No parent page or asset was modified.

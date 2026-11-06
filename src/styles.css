@@ -4,6 +4,7 @@
   font-size: 14px;
   color: #1A1A1A;
   background: #FFFFFF;
+  --panel-blur: none;
   --color-text: #1A1A1A;
   --color-text-muted: #555555;
   --color-text-soft: #444444;
