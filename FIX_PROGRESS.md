@@ -5,7 +5,7 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 | Review finding | Status | Verification |
 | --- | --- | --- |
 | 2. Draft HTML injection | Fixed | Runtime draft shape/depth checks, fresh restored IDs, escaped renderer identifiers; regression tests. |
-| 1. Lossy XML round trips | Pending | |
+| 1. Lossy XML round trips | Fixed | Ordered siblings, mixed text/tails, QName and whitespace round-trip regressions. |
 | 3. XSD particle ordering | Pending | |
 | 4. Syntax and schema validation | Pending | |
 | 5. Namespace validation | Pending | |
@@ -21,3 +21,7 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 ### Fix 2 — validate draft input and protect HTML identifiers
 
 Draft imports validate tree and metadata shapes before use. Restoring a draft allocates fresh IDs and clears stale selection. Renderer identifier attributes are escaped even for internally produced IDs. Malformed JSON structures fail before workspace insertion.
+
+### Fix 1 — preserve ordered XML content
+
+Replaced object-key serialization with ordered XML emission. Element QNames and text tails survive import, draft storage, and export; formatting does not introduce new text. Unsupported comments/processing instructions are rejected explicitly rather than discarded. The current UI edits leading text; trailing mixed-content text remains preserved in the model. Full tests and typecheck pass.

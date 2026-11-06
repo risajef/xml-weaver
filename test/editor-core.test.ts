@@ -280,3 +280,20 @@ describe("draft trust boundary", () => {
     expect(() => importDraftDocument('[]')).toThrow("object");
   });
 });
+
+
+describe("ordered XML round trips", () => {
+  it.each([
+    '<r><a>1</a><b>2</b><a>3</a></r>',
+    '<p>before <b>bold</b> after <i>italic</i> end</p>',
+    '<p:r xmlns:p="urn:correct"><p:a>one</p:a></p:r>',
+    '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r" type="xs:string"></xs:element></xs:schema>',
+    '<r>  white space  </r>',
+  ])("preserves content and lexical namespaces: %s", (input) => {
+    expect(serializeXml(parseXmlString(input).root, null).split("\n").slice(1).join("\n")).toBe(input);
+  });
+  it("rejects constructs it cannot preserve", () => {
+    expect(() => parseXmlString('<r><!--note--></r>')).toThrow("not supported");
+    expect(() => parseXmlString('<?custom x?><r/>')).toThrow("not supported");
+  });
+});

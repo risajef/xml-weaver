@@ -1,4 +1,4 @@
-import { XMLBuilder, XMLParser } from "fast-xml-parser";
+import { XMLParser } from "fast-xml-parser";
 
 export enum SimpleBase {
   String = "string",
@@ -117,6 +117,10 @@ export interface AttributeNode {
 }
 
 export interface ElementNode {
+  /** Lexical QName retained independently of the editor's local-name label. */
+  qualifiedName?: string;
+  /** Text following this element in its parent's ordered content. */
+  tail?: string;
   id: string;
   name: string;
   attributes: AttributeNode[];
@@ -230,6 +234,7 @@ const XML_DOC_PARSER = new XMLParser({
   attributeNamePrefix: "@_",
   parseTagValue: false,
   preserveOrder: true,
+  commentPropName: "#comment",
   trimValues: false,
 });
 
@@ -238,14 +243,6 @@ const XML_SCHEMA_PARSER = new XMLParser({
   attributeNamePrefix: "@_",
   parseTagValue: false,
   trimValues: true,
-});
-
-const XML_OUTPUT = new XMLBuilder({
-  ignoreAttributes: false,
-  attributeNamePrefix: "@_",
-  format: true,
-  suppressBooleanAttributes: false,
-  preserveOrder: false,
 });
 
 let nextId = 1;
@@ -987,17 +984,21 @@ function nodeFromPreservedXml(entry: XmlRecord): ElementNode | null {
   }
 
   const [tagName, childrenValue] = nodeEntry;
+  if (tagName.startsWith("?") || tagName === "#comment") {
+    throw new Error("Comments and processing instructions are not supported by the editor.");
+  }
   const attributes = recordEntries(entry[":@"])
     .map(([name, value]) => createAttributeNode(String(name).replace(/^@_/, ""), String(value ?? "")));
   const node = createElementNode(localName(tagName), { attributes });
+  node.qualifiedName = tagName;
   const childEntries = Array.isArray(childrenValue) ? childrenValue : [];
 
   for (const child of childEntries) {
     if (isRecord(child) && child["#text"] !== undefined) {
       const text = String(child["#text"]);
-      if (text.trim()) {
-        node.text = text;
-      }
+      const previousChild = node.children.at(-1);
+      if (previousChild) previousChild.tail = (previousChild.tail ?? "") + text;
+      else node.text += text;
       continue;
     }
 
@@ -1051,6 +1052,10 @@ function gatherSchemaReferences(rootEntry: XmlRecord): string[] {
 
 export function parseXmlString(xmlText: string): ParsedXmlDocument {
   const parsed = XML_DOC_PARSER.parse(xmlText) as unknown;
+  if (Array.isArray(parsed) && parsed.some((entry: unknown) => isRecord(entry)
+    && Object.keys(entry).some((key) => key === "#comment" || (key.startsWith("?") && key !== "?xml")))) {
+    throw new Error("Comments and processing instructions are not supported by the editor.");
+  }
   const rootEntry = findRootXmlEntry(parsed);
   if (!rootEntry) {
     throw new Error("No XML root element found.");
@@ -1471,29 +1476,17 @@ export function canAppendChild(
   return !probeAnalysis.problems.some((problem) => problem.code === ProblemCode.UnexpectedChild && problem.nodeId === childNode.id);
 }
 
-function toSerializableNode(node: ElementNode): XmlRecord {
-  const payload: XmlRecord = {};
-  for (const attribute of node.attributes) {
-    payload[`@_${attribute.name}`] = attribute.value;
-  }
+function escapeXml(value: string, attribute = false): string {
+  const escaped = value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  return attribute ? escaped.replaceAll('"', "&quot;").replaceAll("\r", "&#13;").replaceAll("\n", "&#10;").replaceAll("\t", "&#9;") : escaped.replaceAll("\r", "&#13;");
+}
 
-  if (node.text) {
-    payload["#text"] = node.text;
-  }
-
-  for (const child of node.children) {
-    const current = payload[child.name];
-    const childPayload = toSerializableNode(child);
-    if (current === undefined) {
-      payload[child.name] = childPayload;
-    } else if (Array.isArray(current)) {
-      current.push(childPayload);
-    } else {
-      payload[child.name] = [current, childPayload];
-    }
-  }
-
-  return payload;
+function serializeOrderedNode(node: ElementNode): string {
+  const prefix = node.qualifiedName?.includes(":") ? node.qualifiedName.split(":")[0] + ":" : "";
+  const name = prefix + node.name;
+  const attributes = node.attributes.map((attribute) => ` ${attribute.name}="${escapeXml(attribute.value, true)}"`).join("");
+  const content = escapeXml(node.text) + node.children.map((child) => serializeOrderedNode(child) + escapeXml(child.tail ?? "")).join("");
+  return `<${name}${attributes}>${content}</${name}>`;
 }
 
 export function serializeXml(root: ElementNode, schema: SchemaModel | null): string {
@@ -1506,7 +1499,7 @@ export function serializeXml(root: ElementNode, schema: SchemaModel | null): str
 }
 
 export function renderSourceXml(root: ElementNode): string {
-  return `<?xml version="1.0" encoding="UTF-8"?>\n${XML_OUTPUT.build({ [root.name]: toSerializableNode(root) })}`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n${serializeOrderedNode(root)}`;
 }
 
 export function exportDraftDocument<T>(documentState: T): string {
@@ -1592,6 +1585,9 @@ function validateDraftTree(value: unknown, depth = 0, budget = { nodes: 0 }): as
   if (!isRecord(value)) throw new Error("Invalid draft node.");
   for (const key of ["id", "name", "text"]) {
     if (typeof value[key] !== "string") throw new Error(`Invalid node ${key}.`);
+  }
+  for (const key of ["qualifiedName", "tail"]) {
+    if (value[key] !== undefined && typeof value[key] !== "string") throw new Error(`Invalid node ${key}.`);
   }
   for (const key of ["placeholder", "textPlaceholder", "collapsed"]) {
     if (typeof value[key] !== "boolean") throw new Error(`Invalid node ${key}.`);
