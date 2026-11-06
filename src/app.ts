@@ -21,6 +21,7 @@ import {
   parseXmlSchema,
   parseXmlString,
   ReplacementMode,
+  ProblemCode,
   renderSourceXml,
   serializeXml,
 } from "./editor-core";
@@ -56,6 +57,8 @@ interface SchemaEntry {
 }
 
 interface AppDocumentState {
+  schemaRequired?: boolean;
+  schemaError?: string;
   id: string;
   title: string;
   fileName: string;
@@ -74,6 +77,9 @@ interface AppDocumentState {
 }
 
 interface DraftDocumentPayload {
+  formatVersion?: number;
+  schemaRequired?: boolean;
+  schemaSource?: { fileName: string; sourceText: string; referenceUri?: string | null };
   title?: string;
   kind?: DocumentKind;
   root: ElementNode;
@@ -443,9 +449,9 @@ function replacementModeFor(documentState: AppDocumentState): ReplacementMode | 
 }
 
 function relinkSchemaByReference(documentState: AppDocumentState): void {
-  if (!documentState?.schemaReferences?.length || documentState.schemaId) {
-    return;
-  }
+  if (documentState.schemaId && state.schemas.has(documentState.schemaId)) return;
+  documentState.schemaId = null;
+  if (!documentState.schemaReferences.length) return;
 
   const candidates = getVisibleSchemas();
   for (const reference of documentState.schemaReferences) {
@@ -461,6 +467,10 @@ function relinkSchemaByReference(documentState: AppDocumentState): void {
 function syncDocumentValidation(documentState: AppDocumentState): void {
   const schema = getSchemaForDocument(documentState);
   documentState.analysis = analyzeDocument(documentState.root, schema);
+  if (documentState.schemaRequired && !schema) {
+    documentState.analysis.problems.push({ code: ProblemCode.SchemaUnavailable, nodeId: documentState.root.id, message: documentState.schemaError || "Required schema is not loaded. Load it or explicitly detach schema validation." });
+    documentState.mode = "migration";
+  }
   if (schema && (documentState.kind === "xml" || documentState.kind === "xsd")) {
     const hasSchemaErrors = documentState.analysis.problems.some((problem) => problem.code !== "placeholder");
     if (hasSchemaErrors && documentState.mode !== "migration") {
@@ -548,6 +558,7 @@ function createXmlDocument(fileName: string, xmlText: string): AppDocumentState 
     root: parsed.root,
     schemaId: null,
     schemaReferences: parsed.schemaReferences,
+    schemaRequired: parsed.schemaReferences.length > 0,
     mode: "edit",
     readOnly: false,
     referenceUri: null,
@@ -592,13 +603,30 @@ function createSchemaDocument(fileName: string, xmlText: string, schemaModel: Sc
 
 function createDraftDocument(fileName: string, draftJson: string): AppDocumentState {
   const loaded = importDraftDocument<DraftDocumentPayload>(draftJson);
+  let schemaId = loaded.schemaId && state.schemas.has(loaded.schemaId) ? loaded.schemaId : null;
+  if (loaded.schemaSource) {
+    const model = parseXmlSchema(loaded.schemaSource.sourceText);
+    schemaId = documentId("restored-schema");
+    state.schemas.set(schemaId, { id: schemaId, title: loaded.schemaSource.fileName, fileName: loaded.schemaSource.fileName, model, sourceText: loaded.schemaSource.sourceText, documentId: null });
+  }
+  let registrationId: string | null = null;
+  if (loaded.kind === "xsd") {
+    registrationId = documentId("restored-xsd");
+    // Registration is compiled by refresh once placeholders have been resolved.
+    try {
+      const sourceText = serializeXml(loaded.root, null);
+      state.schemas.set(registrationId, { id: registrationId, title: loaded.title || fileName, fileName, model: parseXmlSchema(sourceText), sourceText, documentId: null });
+    } catch { /* An incomplete XSD remains editable but is not published as a schema. */ }
+    schemaId = BUILTIN_XSD_META_SCHEMA_ID;
+  }
   return {
     id: documentId(loaded.kind || "draft"),
     title: loaded.title || fileName,
     fileName,
     kind: loaded.kind || "xml",
     root: withFreshIds(loaded.root),
-    schemaId: loaded.schemaId || null,
+    schemaId,
+    schemaRequired: loaded.schemaRequired ?? Boolean(loaded.schemaId || loaded.schemaSource || loaded.schemaReferences?.length),
     schemaReferences: loaded.schemaReferences || [],
     mode: loaded.mode || "edit",
     readOnly: loaded.readOnly ?? false,
@@ -606,7 +634,7 @@ function createDraftDocument(fileName: string, draftJson: string): AppDocumentSt
     allowAutoLeaveMigration: loaded.allowAutoLeaveMigration ?? true,
     selectedId: null,
     analysis: createEmptyAnalysis(),
-    schemaRegistrationId: loaded.schemaRegistrationId || null,
+    schemaRegistrationId: registrationId,
   };
 }
 
@@ -1397,7 +1425,11 @@ function saveDraft(): void {
     return;
   }
 
+  const linked = documentState.schemaId ? state.schemas.get(documentState.schemaId) : null;
   const payload = exportDraftDocument({
+    formatVersion: 1,
+    schemaRequired: documentState.schemaRequired ?? Boolean(documentState.schemaId),
+    schemaSource: linked ? { fileName: linked.fileName, sourceText: linked.sourceText } : undefined,
     title: documentState.title,
     kind: documentState.kind,
     root: documentState.root,
@@ -1422,6 +1454,8 @@ function exportCurrentDocument(): void {
   }
 
   try {
+    syncDocumentValidation(documentState);
+    if (documentState.analysis.problems.length) throw new Error(documentState.analysis.problems[0].message);
     const xml = serializeXml(documentState.root, getSchemaForDocument(documentState));
     const fileName = documentState.kind === "xsd"
       ? basename(documentState.fileName).replace(/\.json$/i, ".xsd")
@@ -1474,6 +1508,7 @@ function updateSchemaLink(schemaId: string): void {
   }
 
   documentState.schemaId = schemaId || null;
+  documentState.schemaRequired = Boolean(schemaId);
   documentState.mode = "edit";
   refreshDocument(documentState);
   setNotice(schemaId ? "Linked schema to the current document." : "Detached the schema from the current document.");
@@ -2169,3 +2204,6 @@ document.addEventListener("keydown", (event) => {
 
 ensureBuiltinSchemas();
 render();
+
+// Workspace operations are exported for adapters and controller integration tests.
+export { state, openDetectedDocument, createDraftDocument, addDocument, syncDocumentValidation, updateSchemaLink, saveDraft, exportCurrentDocument };

@@ -9,7 +9,7 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 | 3. XSD particle ordering | Fixed | Alternating element/choice/element conformance and scaffolding regression. |
 | 4. Syntax and schema validation | Fixed | Malformed XML, final export, numeric lexical/range checks and unsupported schema regressions. |
 | 5. Namespace validation | Fixed | Namespace URI matching, qualified scaffolds, alternate xsi prefix and unbound-prefix tests. |
-| 6. Durable draft schema binding | Pending | |
+| 6. Durable draft schema binding | Fixed | Cross-session embedded schema, legacy missing-schema and hostile-ID controller tests. |
 | 7. Edit invariants | Pending | |
 | 8. Resource limits | Pending | |
 | 9. Schema lifecycle | Pending | |
@@ -37,3 +37,7 @@ Added explicit XML syntax/character/name checks and final-output revalidation. U
 ### Fix 5 — validate namespace identities
 
 Schema compilation resolves QName namespaces and rejects foreign/unbound references. Document analysis compares namespace URIs for elements/attributes and applies schema qualification defaults. Scaffolds carry explicit default bindings; schema-instance references work with any bound prefix. Corrected the bundled subset meta-schema to be a namespace-correct XSD. The supported schema contract remains single-schema: imports/includes are explicitly rejected.
+
+### Fix 6 — version drafts and restore schema enforcement
+
+Version 1 drafts embed the selected schema source and an explicit schema requirement. Restoring compiles a fresh registry entry rather than trusting session IDs. Legacy missing links produce a visible blocking error until loaded or explicitly detached. XSD drafts receive a new registration identity. Controller tests exercise actual workspace operations with a minimal DOM adapter.

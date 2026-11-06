@@ -26,6 +26,7 @@ export enum ProblemCode {
   Placeholder = "placeholder",
   UnknownElement = "unknown-element",
   Namespace = "namespace",
+  SchemaUnavailable = "schema-unavailable",
   UnexpectedAttribute = "unexpected-attribute",
   InvalidAttributeValue = "invalid-attribute-value",
   MissingRequiredAttribute = "missing-required-attribute",
@@ -1593,6 +1594,11 @@ export function importDraftDocument<T>(serialized: string): T {
   const value: unknown = JSON.parse(serialized);
   if (!isRecord(value)) throw new Error("Draft must be an object.");
   if ("root" in value) validateDraftTree(value.root);
+  if (value.formatVersion !== undefined && value.formatVersion !== 1) throw new Error("Unsupported draft format version.");
+  if (value.schemaRequired !== undefined && typeof value.schemaRequired !== "boolean") throw new Error("Invalid schema requirement.");
+  if (value.schemaSource !== undefined) {
+    if (!isRecord(value.schemaSource) || typeof value.schemaSource.fileName !== "string" || typeof value.schemaSource.sourceText !== "string") throw new Error("Invalid embedded schema.");
+  }
   for (const key of ["title", "schemaId", "referenceUri", "selectedId", "schemaRegistrationId"]) {
     if (value[key] != null && typeof value[key] !== "string") throw new Error(`Invalid draft ${key}.`);
   }
