@@ -312,3 +312,22 @@ describe("XSD particle ordering", () => {
     expect(createMinimalDocument(ordered, "r").children.map((node) => node.name)).toEqual(["a", "placeholder", "d"]);
   });
 });
+
+
+describe("fail-closed validation", () => {
+  it.each(['<r><a>one</r>', '<r/><s/>', '<!DOCTYPE r><r/>'])('rejects invalid/unsupported XML %s', (text) => {
+    expect(() => parseXmlString(text)).toThrow();
+  });
+  it.each(['1.5', '0x10', '', '2147483648', 'Infinity'])('rejects invalid xs:int %s', (value) => {
+    const schema = parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r" type="xs:int"/></xs:schema>');
+    expect(() => serializeXml(parseXmlString(`<r>${value}</r>`).root, schema)).toThrow();
+  });
+  it("rejects unsupported facets and unresolved types", () => {
+    expect(() => parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r" type="missing"/></xs:schema>')).toThrow("unresolved");
+    expect(() => parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:simpleType name="t"><xs:restriction base="xs:string"><xs:pattern value="[A-Z]+"/></xs:restriction></xs:simpleType></xs:schema>')).toThrow("Unsupported");
+  });
+  it("checks names and characters at export", () => {
+    expect(() => serializeXml(createElementNode("bad name"), null)).toThrow("name");
+    expect(() => serializeXml(createElementNode("r", {text: "\u0001"}), null)).toThrow("character");
+  });
+});

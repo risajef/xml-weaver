@@ -1,4 +1,4 @@
-import { XMLParser } from "fast-xml-parser";
+import { XMLParser, XMLValidator } from "fast-xml-parser";
 
 export enum SimpleBase {
   String = "string",
@@ -73,6 +73,7 @@ function schemaRecord(entries: unknown): XmlRecord {
 export interface SimpleTypeDefinition {
   kind: ValueTypeKind.Simple;
   base: SimpleBase;
+  builtin?: string;
   enumerations: string[];
 }
 
@@ -313,17 +314,13 @@ function firstEntry(node: XmlRecord): [string, unknown] | undefined {
   return Object.entries(node).find(([key]) => key !== ":@" && key !== "#text");
 }
 
+const BUILTIN_TYPES = new Set(["string", "boolean", "int", "integer", "decimal", "float", "double", "long", "short"]);
+
 export function resolveBuiltinSimpleType(typeName?: string | null): SimpleTypeDefinition {
-  const normalized = localName(typeName ?? SimpleBase.String);
-  if (normalized === SimpleBase.Boolean) {
-    return { kind: ValueTypeKind.Simple, base: SimpleBase.Boolean, enumerations: [] };
-  }
-
-  if (["int", "integer", "decimal", "float", "double", "long", "short"].includes(normalized)) {
-    return { kind: ValueTypeKind.Simple, base: SimpleBase.Number, enumerations: [] };
-  }
-
-  return { kind: ValueTypeKind.Simple, base: SimpleBase.String, enumerations: [] };
+  const builtin = localName(typeName ?? "string");
+  if (!BUILTIN_TYPES.has(builtin)) throw new Error(`Unsupported or unresolved type: ${typeName}`);
+  const base = builtin === "string" ? SimpleBase.String : builtin === "boolean" ? SimpleBase.Boolean : SimpleBase.Number;
+  return { kind: ValueTypeKind.Simple, base, builtin, enumerations: [] };
 }
 
 function createAttributeNode(name: string, value = "", options: Partial<AttributeNode> = {}): AttributeNode {
@@ -369,7 +366,7 @@ function parseEnumerationValues(node: XmlRecord): string[] {
         return [];
       }
       const value = readString(entry, "@_value");
-      return value ? [value] : [];
+      return value !== undefined ? [value] : [];
     });
 }
 
@@ -382,14 +379,15 @@ function parseSimpleType(node: XmlRecord, registry: Registry): SimpleTypeDefinit
   const baseName = readString(restriction, "@_base") ?? SimpleBase.String;
   const typeFromRegistry = registry.simpleTypes.get(localName(baseName));
   const inherited = typeFromRegistry ? clone(typeFromRegistry) : resolveBuiltinSimpleType(baseName);
-  inherited.enumerations = parseEnumerationValues(restriction);
+  const enumerations = parseEnumerationValues(restriction);
+  if (enumerations.length) inherited.enumerations = enumerations;
   return inherited;
 }
 
 function parseAttribute(node: XmlRecord, registry: Registry): AttributeDefinition {
   const name = readString(node, "@_name") ?? localName(readString(node, "@_ref") ?? "");
   const use = readString(node, "@_use") === AttributeUse.Required ? AttributeUse.Required : AttributeUse.Optional;
-  let valueType = resolveBuiltinSimpleType(readString(node, "@_type"));
+  let valueType = resolveBuiltinSimpleType();
   const inlineTypeNode = findNamedChild(node, "simpleType");
 
   if (isRecord(inlineTypeNode)) {
@@ -694,19 +692,28 @@ function createMinimalChildrenForParticle(schema: SchemaModel, particle: Particl
 }
 
 export function validateSimpleValue(type: SimpleTypeDefinition | null | undefined, value: string | null | undefined): string | null {
-  const text = value ?? "";
-  if (type?.enumerations.length && !type.enumerations.includes(text)) {
-    return `Expected one of: ${type.enumerations.join(", ")}`;
+  const text = type?.base === SimpleBase.String ? value ?? "" : (value ?? "").trim();
+  const builtin = type?.builtin;
+  if (type?.base === SimpleBase.Boolean && !["true", "false", "1", "0"].includes(text)) return "Expected a boolean value";
+  if (type?.base === SimpleBase.Number) {
+    const integer = ["int", "integer", "long", "short"].includes(builtin ?? "");
+    const valid = integer ? /^[+-]?\d+$/.test(text)
+      : builtin === "decimal" ? /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)
+      : /^(?:[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|INF|-INF|NaN)$/.test(text);
+    if (!valid) return `Expected a numeric value (${builtin ?? "number"})`;
+    if (integer && builtin !== "integer") {
+      const bounds: Record<string, [bigint, bigint]> = {
+        short: [-32768n, 32767n], int: [-2147483648n, 2147483647n], long: [-9223372036854775808n, 9223372036854775807n],
+      };
+      const [min, max] = bounds[builtin!];
+      if (BigInt(text) < min || BigInt(text) > max) return `Value outside ${builtin} range`;
+    }
   }
-
-  if (type?.base === SimpleBase.Boolean && text !== "" && !["true", "false", "1", "0"].includes(text)) {
-    return "Expected a boolean value";
+  if (type?.enumerations.length) {
+    const canonical = (entry: string): string => type.base === SimpleBase.Boolean ? (["1", "true"].includes(entry.trim()) ? "true" : "false")
+      : type.base === SimpleBase.Number ? (["int", "integer", "long", "short"].includes(builtin ?? "") ? BigInt(entry.trim()).toString() : String(Number(entry.trim()))) : entry;
+    if (!type.enumerations.some((entry) => canonical(entry) === canonical(text))) return `Expected one of: ${type.enumerations.join(", ")}`;
   }
-
-  if (type?.base === SimpleBase.Number && text !== "" && Number.isNaN(Number(text))) {
-    return "Expected a numeric value";
-  }
-
   return null;
 }
 
@@ -1070,10 +1077,14 @@ function gatherSchemaReferences(rootEntry: XmlRecord): string[] {
 }
 
 export function parseXmlString(xmlText: string): ParsedXmlDocument {
+  validateXmlSyntax(xmlText);
   const parsed = XML_DOC_PARSER.parse(xmlText) as unknown;
   if (Array.isArray(parsed) && parsed.some((entry: unknown) => isRecord(entry)
     && Object.keys(entry).some((key) => key === "#comment" || (key.startsWith("?") && key !== "?xml")))) {
     throw new Error("Comments and processing instructions are not supported by the editor.");
+  }
+  if (Array.isArray(parsed) && parsed.filter((entry: unknown) => isRecord(entry) && Object.keys(entry).some((key) => !key.startsWith("?") && key !== "#text" && key !== ":@")).length !== 1) {
+    throw new Error("XML must have exactly one root element.");
   }
   const rootEntry = findRootXmlEntry(parsed);
   if (!rootEntry) {
@@ -1092,6 +1103,7 @@ export function parseXmlString(xmlText: string): ParsedXmlDocument {
 }
 
 export function parseXmlSchema(xsdText: string): SchemaModel {
+  validateXmlSyntax(xsdText);
   const raw = schemaRecord(XML_SCHEMA_PARSER.parse(xsdText));
   if (!isRecord(raw)) {
     throw new Error("Expected an XML schema document.");
@@ -1102,7 +1114,8 @@ export function parseXmlSchema(xsdText: string): SchemaModel {
     throw new Error("Expected an XML schema document.");
   }
 
-  const [schemaKey, schemaNode] = schemaEntry;
+  const [, schemaNode] = schemaEntry;
+  checkSchemaSubset(schemaNode, "schema");
   const registry: Registry = {
     simpleTypes: new Map(),
     complexTypes: new Map(),
@@ -1169,7 +1182,7 @@ export function parseXmlSchema(xsdText: string): SchemaModel {
     }
   }
 
-  return {
+  const model: SchemaModel = {
     targetNamespace: readString(schemaNode, "@_targetNamespace") ?? "",
     elements: registry.elements,
     simpleTypes: registry.simpleTypes,
@@ -1177,6 +1190,17 @@ export function parseXmlSchema(xsdText: string): SchemaModel {
     rootElements: [...registry.elements.keys()],
     sourceText: xsdText,
   };
+  const inspectParticle = (particle: Particle | null): void => {
+    if (!particle) return;
+    if (particle.kind === ParticleKind.Element) {
+      if (particle.refName && !model.elements.has(particle.refName)) throw new Error(`Unresolved element: ${particle.refName}`);
+      const type = resolveType(model, particle);
+      if (particle.type?.kind === ValueTypeKind.Complex) inspectParticle(type.kind === ValueTypeKind.Complex ? type.content : null);
+    } else particle.items.forEach(inspectParticle);
+  };
+  model.elements.forEach(inspectParticle);
+  model.complexTypes.forEach((type) => inspectParticle(type.content));
+  return model;
 }
 
 export function analyzeDocument(root: ElementNode, schema: SchemaModel | null): AnalysisResult {
@@ -1503,6 +1527,9 @@ function escapeXml(value: string, attribute = false): string {
 function serializeOrderedNode(node: ElementNode): string {
   const prefix = node.qualifiedName?.includes(":") ? node.qualifiedName.split(":")[0] + ":" : "";
   const name = prefix + node.name;
+  assertXmlName(name);
+  for (const attribute of node.attributes) assertXmlName(attribute.name);
+  if (new Set(node.attributes.map((attribute) => attribute.name)).size !== node.attributes.length) throw new Error("Duplicate attribute names.");
   const attributes = node.attributes.map((attribute) => ` ${attribute.name}="${escapeXml(attribute.value, true)}"`).join("");
   const content = escapeXml(node.text) + node.children.map((child) => serializeOrderedNode(child) + escapeXml(child.tail ?? "")).join("");
   return `<${name}${attributes}>${content}</${name}>`;
@@ -1514,7 +1541,11 @@ export function serializeXml(root: ElementNode, schema: SchemaModel | null): str
     throw new Error("Cannot export while placeholders or schema errors remain.");
   }
 
-  return renderSourceXml(root);
+  const output = renderSourceXml(root);
+  validateXmlSyntax(output);
+  const exported = parseXmlString(output).root;
+  if (analyzeDocument(exported, schema).problems.length) throw new Error("Serialized XML does not validate.");
+  return output;
 }
 
 export function renderSourceXml(root: ElementNode): string {
@@ -1620,4 +1651,60 @@ function validateDraftTree(value: unknown, depth = 0, budget = { nodes: 0 }): as
       || !attribute.expectedValues.every((entry) => typeof entry === "string")) throw new Error("Invalid draft attribute.");
   }
   for (const child of value.children) validateDraftTree(child, depth + 1, budget);
+}
+
+const XML_NAME = /^[\p{L}_][\p{L}\p{N}_.\-\u00B7\p{M}]*(?::[\p{L}_][\p{L}\p{N}_.\-\u00B7\p{M}]*)?$/u;
+function assertXmlName(name: string): void {
+  if (!XML_NAME.test(name)) throw new Error(`Invalid XML name: ${name}`);
+}
+
+function validateXmlSyntax(text: string): void {
+  if (/<!DOCTYPE|<!ENTITY/i.test(text)) throw new Error("DTD and entity declarations are not supported.");
+  if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDFFF]/u.test(text)) throw new Error("Invalid XML character.");
+  const result = XMLValidator.validate(text);
+  if (result !== true) throw new Error(`Malformed XML: ${result.err.msg}`);
+}
+
+const SCHEMA_SUBSET: Record<string, { children: string[]; attributes: string[] }> = {
+  schema: { children: ["simpleType", "complexType", "element"], attributes: ["targetNamespace", "elementFormDefault", "attributeFormDefault"] },
+  simpleType: { children: ["restriction"], attributes: ["name"] },
+  restriction: { children: ["enumeration"], attributes: ["base"] },
+  enumeration: { children: [], attributes: ["value"] },
+  complexType: { children: ["sequence", "choice", "attribute", "simpleContent"], attributes: ["name"] },
+  simpleContent: { children: ["extension"], attributes: [] },
+  extension: { children: ["attribute"], attributes: ["base"] },
+  element: { children: ["simpleType", "complexType"], attributes: ["name", "ref", "type", "minOccurs", "maxOccurs", "form"] },
+  sequence: { children: ["element", "sequence", "choice"], attributes: ["minOccurs", "maxOccurs"] },
+  choice: { children: ["element", "sequence", "choice"], attributes: ["minOccurs", "maxOccurs"] },
+  attribute: { children: ["simpleType"], attributes: ["name", "type", "use", "form"] },
+};
+
+function checkSchemaSubset(node: XmlRecord, tag: string): void {
+  const spec = SCHEMA_SUBSET[tag];
+  if (!spec) throw new Error(`Unsupported XSD construct: ${tag}`);
+  for (const [key, value] of Object.entries(node)) {
+    if (key.startsWith("@_")) {
+      const name = key.slice(2);
+      if (name === "xmlns" || name.startsWith("xmlns:")) continue;
+      if (!spec.attributes.includes(name)) throw new Error(`Unsupported XSD attribute: ${tag}/@${name}`);
+    } else if (key === "#text") {
+      if (String(value).trim()) throw new Error(`Unexpected text in XSD ${tag}`);
+    } else {
+      const childName = localName(key);
+      if (!spec.children.includes(childName)) throw new Error(`Unsupported XSD construct: ${tag}/${childName}`);
+      for (const child of arrayify(value)) if (isRecord(child)) checkSchemaSubset(child, childName);
+    }
+  }
+  const children = (node[ORDERED_CHILDREN] ?? []).filter(([name]) => name !== "#text");
+  if (tag === "simpleType" && children.length !== 1) throw new Error("simpleType requires one restriction.");
+  if (tag === "complexType" && children.filter(([name]) => localName(name) !== "attribute").length > 1) throw new Error("Multiple complex content models are not supported.");
+  if (tag === "element") {
+    const options = Number(node["@_ref"] !== undefined) + Number(node["@_type"] !== undefined) + children.length;
+    if (options > 1 || (!node["@_ref"] && !node["@_name"])) throw new Error("Invalid element declaration.");
+    if (options === 0) throw new Error("Elements require an explicit supported type.");
+  }
+  if (node["@_use"] !== undefined && !["required", "optional"].includes(String(node["@_use"]))) throw new Error("Unsupported attribute use.");
+  for (const field of ["elementFormDefault", "attributeFormDefault", "form"]) {
+    if (node[`@_${field}`] !== undefined && !["qualified", "unqualified"].includes(String(node[`@_${field}`]))) throw new Error(`Invalid ${field}.`);
+  }
 }

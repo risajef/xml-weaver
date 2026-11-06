@@ -7,7 +7,7 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 | 2. Draft HTML injection | Fixed | Runtime draft shape/depth checks, fresh restored IDs, escaped renderer identifiers; regression tests. |
 | 1. Lossy XML round trips | Fixed | Ordered siblings, mixed text/tails, QName and whitespace round-trip regressions. |
 | 3. XSD particle ordering | Fixed | Alternating element/choice/element conformance and scaffolding regression. |
-| 4. Syntax and schema validation | Pending | |
+| 4. Syntax and schema validation | Fixed | Malformed XML, final export, numeric lexical/range checks and unsupported schema regressions. |
 | 5. Namespace validation | Pending | |
 | 6. Durable draft schema binding | Pending | |
 | 7. Edit invariants | Pending | |
@@ -29,3 +29,7 @@ Replaced object-key serialization with ordered XML emission. Element QNames and 
 ### Fix 3 — compile particles in declaration order
 
 The schema parser preserves original child order separately from named lookup. Particle compilation consumes that order, so repeated element tags no longer jump across intervening choices or sequences. Tests cover both valid and invalid permutations and generated scaffolding.
+
+### Fix 4 — fail closed at parsing and export
+
+Added explicit XML syntax/character/name checks and final-output revalidation. Unsupported XSD features and unresolved element/type references fail compilation. Numeric builtin lexical rules and integer bounds replace JavaScript Number coercion; empty numeric/boolean values are invalid. Documented the deliberately limited XSD contract instead of claiming general conformance.
