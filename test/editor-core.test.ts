@@ -134,8 +134,8 @@ describe("schema parsing and analysis", () => {
   it("minimal document scaffolds required placeholders", () => {
     const root = createMinimalDocument(schema, "book");
     expect(root.name).toBe("book");
-    expect(root.attributes[0]?.name).toBe("format");
-    expect(root.attributes[0]?.placeholder).toBe(true);
+    expect(root.attributes.find((attribute) => attribute.name === "format")?.name).toBe("format");
+    expect(root.attributes.find((attribute) => attribute.name === "format")?.placeholder).toBe(true);
     expect(root.children[0]?.name).toBe("title");
     expect(root.children[0]?.textPlaceholder).toBe(true);
     expect(root.children[1]?.placeholder).toBe(true);
@@ -329,5 +329,24 @@ describe("fail-closed validation", () => {
   it("checks names and characters at export", () => {
     expect(() => serializeXml(createElementNode("bad name"), null)).toThrow("name");
     expect(() => serializeXml(createElementNode("r", {text: "\u0001"}), null)).toThrow("character");
+  });
+});
+
+
+describe("namespace identity", () => {
+  const schema = parseXmlSchema('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:expected"><xs:element name="r" type="xs:string"/></xs:schema>');
+  it("rejects a wrong namespace and accepts any prefix for the right URI", () => {
+    expect(() => serializeXml(parseXmlString('<r xmlns="urn:wrong">ok</r>').root, schema)).toThrow();
+    expect(serializeXml(parseXmlString('<p:r xmlns:p="urn:expected">ok</p:r>').root, schema)).toContain('<p:r');
+    const minimal = createMinimalDocument(schema, "r");
+    minimal.text = "ok"; minimal.textPlaceholder = false;
+    expect(serializeXml(minimal, schema)).toContain('xmlns="urn:expected"');
+  });
+  it("resolves schema-instance attributes by URI", () => {
+    expect(parseXmlString('<r xmlns:s="http://www.w3.org/2001/XMLSchema-instance" s:noNamespaceSchemaLocation="a.xsd"/>').schemaReferences).toEqual(["a.xsd"]);
+  });
+  it("rejects unbound prefixes and non-XSD schema namespaces", () => {
+    expect(() => parseXmlString('<p:r/>')).toThrow("Unbound");
+    expect(() => parseXmlSchema('<schema><element name="r" type="string"/></schema>')).toThrow("namespace");
   });
 });

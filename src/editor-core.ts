@@ -25,6 +25,7 @@ export enum AttributeUse {
 export enum ProblemCode {
   Placeholder = "placeholder",
   UnknownElement = "unknown-element",
+  Namespace = "namespace",
   UnexpectedAttribute = "unexpected-attribute",
   InvalidAttributeValue = "invalid-attribute-value",
   MissingRequiredAttribute = "missing-required-attribute",
@@ -50,8 +51,18 @@ export enum ReplacementMode {
   Migration = "migration",
 }
 
+const SCHEMA_CONTEXT = Symbol("schema-context");
+const XSD_NAMESPACE = "http://www.w3.org/2001/XMLSchema";
+const XSI_NAMESPACE = "http://www.w3.org/2001/XMLSchema-instance";
+interface SchemaContext {
+  namespaces: Record<string, string>;
+  target: string;
+  elementForm: string;
+  attributeForm: string;
+  global: boolean;
+}
 const ORDERED_CHILDREN = Symbol("ordered-schema-children");
-type XmlRecord = Record<string, unknown> & { [ORDERED_CHILDREN]?: [string, unknown][] };
+type XmlRecord = Record<string, unknown> & { [SCHEMA_CONTEXT]?: SchemaContext; [ORDERED_CHILDREN]?: [string, unknown][] };
 
 function schemaRecord(entries: unknown): XmlRecord {
   const result: XmlRecord = {};
@@ -78,12 +89,14 @@ export interface SimpleTypeDefinition {
 }
 
 export interface AttributeDefinition {
+  namespaceUri?: string;
   name: string;
   use: AttributeUse;
   valueType: SimpleTypeDefinition;
 }
 
 export interface ElementDefinition {
+  namespaceUri?: string;
   kind: ParticleKind.Element;
   name: string;
   refName: string | null;
@@ -400,7 +413,8 @@ function parseAttribute(node: XmlRecord, registry: Registry): AttributeDefinitio
     }
   }
 
-  return { name, use, valueType };
+    const context = node[SCHEMA_CONTEXT];
+  return { name, use, valueType, namespaceUri: (readString(node, "@_form") ?? context?.attributeForm) === "qualified" ? context?.target ?? "" : "" };
 }
 
 export function normalizeOccurs(node: XmlRecord): { minOccurs: number; maxOccurs: number } {
@@ -432,6 +446,7 @@ function parseElement(node: XmlRecord, registry: Registry): ElementDefinition {
 
   return {
     kind: ParticleKind.Element,
+    namespaceUri: node[SCHEMA_CONTEXT]?.global || (readString(node, "@_form") ?? node[SCHEMA_CONTEXT]?.elementForm) === "qualified" ? node[SCHEMA_CONTEXT]?.target ?? "" : "",
     name,
     refName,
     type,
@@ -632,6 +647,8 @@ function createMinimalNodeForElement(schema: SchemaModel, elementDef: ElementDef
 
   const type = resolveType(schema, resolvedElement);
   const node = createElementNode(resolvedElement.name);
+  // Explicit default binding keeps scaffolded names correct under any parent.
+  if (resolvedElement.namespaceUri !== undefined) node.attributes.push(createAttributeNode("xmlns", resolvedElement.namespaceUri));
 
   if (type.kind === ValueTypeKind.Simple) {
     node.textPlaceholder = true;
@@ -884,7 +901,11 @@ function collectProblemsForNode(
   elementDef: ElementDefinition | null,
   parentId: string | null,
   results: AnalysisResult,
+  inheritedNamespaces: Record<string, string> = { xml: "http://www.w3.org/XML/1998/namespace" },
 ): void {
+  const namespaces = nodeNamespaces(node, inheritedNamespaces);
+  const lexicalName = node.qualifiedName?.includes(":") ? node.qualifiedName.split(":")[0] + ":" + node.name : node.name;
+  const namespaceUri = expandedNamespace(lexicalName, namespaces, false);
   const { problems, nodeInfoById, attributeInfoById } = results;
   const info = buildNodeInfo(schema, elementDef, parentId);
   nodeInfoById.set(node.id, info);
@@ -906,17 +927,23 @@ function collectProblemsForNode(
     });
   }
 
+  if (elementDef && namespaceUri !== (elementDef.namespaceUri ?? "")) {
+    problems.push({ code: ProblemCode.Namespace, nodeId: node.id, message: `Wrong namespace for ${node.name}: expected ${elementDef.namespaceUri ?? "(none)"}.` });
+  }
   const complexType = info.type?.kind === ValueTypeKind.Complex ? info.type : null;
   const simpleType = info.type?.kind === ValueTypeKind.Simple ? info.type : complexType?.textType ?? null;
   const allowedAttributes = new Map((complexType?.attributes ?? []).map((attribute) => [attribute.name, attribute]));
 
   for (const attribute of node.attributes) {
-    if (isSchemaInfrastructureAttribute(attribute.name)) {
+    const attributeNamespace = expandedNamespace(attribute.name, namespaces, true);
+    if (attribute.name === "xmlns" || attribute.name.startsWith("xmlns:")
+      || (attributeNamespace === XSI_NAMESPACE && ["schemaLocation", "noNamespaceSchemaLocation"].includes(localName(attribute.name)))) {
       attributeInfoById.set(attribute.id, { attributeDef: null, nodeId: node.id });
       continue;
     }
 
-    const attributeDef = allowedAttributes.get(localName(attribute.name)) ?? null;
+    const candidate = allowedAttributes.get(localName(attribute.name));
+    const attributeDef = candidate && (candidate.namespaceUri ?? "") === attributeNamespace ? candidate : null;
     attributeInfoById.set(attribute.id, { attributeDef, nodeId: node.id });
 
     if (attribute.placeholder) {
@@ -951,7 +978,7 @@ function collectProblemsForNode(
   }
 
   for (const attributeDef of complexType?.attributes ?? []) {
-    if (attributeDef.use === AttributeUse.Required && !node.attributes.some((attribute) => localName(attribute.name) === attributeDef.name)) {
+    if (attributeDef.use === AttributeUse.Required && !node.attributes.some((attribute) => localName(attribute.name) === attributeDef.name && expandedNamespace(attribute.name, namespaces, true) === (attributeDef.namespaceUri ?? ""))) {
       problems.push({
         code: ProblemCode.MissingRequiredAttribute,
         nodeId: node.id,
@@ -999,7 +1026,7 @@ function collectProblemsForNode(
 
   for (const child of node.children) {
     const childInfo = nodeInfoById.get(child.id);
-    collectProblemsForNode(schema, child, childInfo?.elementDef ?? schema.elements.get(child.name) ?? null, node.id, results);
+    collectProblemsForNode(schema, child, childInfo?.elementDef ?? schema.elements.get(child.name) ?? null, node.id, results, namespaces);
   }
 }
 
@@ -1057,12 +1084,16 @@ function findRootXmlEntry(entries: unknown): XmlRecord | undefined {
 function gatherSchemaReferences(rootEntry: XmlRecord): string[] {
   const attributes = readRecord(rootEntry, ":@") ?? {};
   const references: string[] = [];
-  const noNamespace = readString(attributes, "@_xsi:noNamespaceSchemaLocation");
+  const bindings: Record<string, string> = {};
+  for (const [key, value] of Object.entries(attributes)) if (key.startsWith("@_xmlns:")) bindings[key.slice(8)] = String(value);
+  const xsiPrefix = Object.keys(bindings).find((prefix) => bindings[prefix] === XSI_NAMESPACE);
+  if (!xsiPrefix) return [];
+  const noNamespace = readString(attributes, `@_${xsiPrefix}:noNamespaceSchemaLocation`);
   if (noNamespace) {
     references.push(noNamespace);
   }
 
-  const schemaLocation = readString(attributes, "@_xsi:schemaLocation");
+  const schemaLocation = readString(attributes, `@_${xsiPrefix}:schemaLocation`);
   if (schemaLocation) {
     const tokens = schemaLocation.split(/\s+/).filter(Boolean);
     for (let index = 1; index < tokens.length; index += 2) {
@@ -1096,6 +1127,7 @@ export function parseXmlString(xmlText: string): ParsedXmlDocument {
     throw new Error("No XML root element found.");
   }
 
+  validateTreeNamespaces(root);
   return {
     root,
     schemaReferences: gatherSchemaReferences(rootEntry),
@@ -1115,6 +1147,7 @@ export function parseXmlSchema(xsdText: string): SchemaModel {
   }
 
   const [, schemaNode] = schemaEntry;
+  annotateSchema(schemaNode, "schema", { namespaces: {xml: "http://www.w3.org/XML/1998/namespace"}, target: readString(schemaNode, "@_targetNamespace") ?? "", elementForm: readString(schemaNode, "@_elementFormDefault") ?? "unqualified", attributeForm: readString(schemaNode, "@_attributeFormDefault") ?? "unqualified", global: false }, schemaEntry[0]);
   checkSchemaSubset(schemaNode, "schema");
   const registry: Registry = {
     simpleTypes: new Map(),
@@ -1706,5 +1739,61 @@ function checkSchemaSubset(node: XmlRecord, tag: string): void {
   if (node["@_use"] !== undefined && !["required", "optional"].includes(String(node["@_use"]))) throw new Error("Unsupported attribute use.");
   for (const field of ["elementFormDefault", "attributeFormDefault", "form"]) {
     if (node[`@_${field}`] !== undefined && !["qualified", "unqualified"].includes(String(node[`@_${field}`]))) throw new Error(`Invalid ${field}.`);
+  }
+}
+
+function nodeNamespaces(node: ElementNode, inherited: Record<string, string>): Record<string, string> {
+  const bindings = { ...inherited };
+  for (const attribute of node.attributes) {
+    if (attribute.name === "xmlns") bindings[""] = attribute.value;
+    else if (attribute.name.startsWith("xmlns:")) bindings[attribute.name.slice(6)] = attribute.value;
+  }
+  if (bindings.xml !== undefined && bindings.xml !== "http://www.w3.org/XML/1998/namespace") throw new Error("Invalid xml namespace binding.");
+  if (bindings.xmlns !== undefined || Object.values(bindings).includes("http://www.w3.org/2000/xmlns/")) throw new Error("Invalid xmlns binding.");
+  return bindings;
+}
+
+function expandedNamespace(name: string, bindings: Record<string, string>, attribute: boolean): string {
+  const prefix = name.includes(":") ? name.split(":")[0] : "";
+  if (prefix === "xmlns" || name === "xmlns") return "http://www.w3.org/2000/xmlns/";
+  if (prefix && !bindings[prefix]) throw new Error(`Unbound namespace prefix: ${prefix}`);
+  return prefix ? bindings[prefix] : attribute ? "" : bindings[""] ?? "";
+}
+
+function validateTreeNamespaces(root: ElementNode): void {
+  const visit = (node: ElementNode, inherited: Record<string, string>): void => {
+    const bindings = nodeNamespaces(node, inherited);
+    expandedNamespace(node.qualifiedName?.includes(":") ? node.qualifiedName.split(":")[0] + ":" + node.name : node.name, bindings, false);
+    const names = new Set<string>();
+    for (const attribute of node.attributes) {
+      const key = `${expandedNamespace(attribute.name, bindings, true)}|${localName(attribute.name)}`;
+      if (names.has(key)) throw new Error("Duplicate expanded attribute name.");
+      names.add(key);
+    }
+    node.children.forEach((child) => visit(child, bindings));
+  };
+  visit(root, {xml: "http://www.w3.org/XML/1998/namespace"});
+}
+
+function annotateSchema(node: XmlRecord, tag: string, inherited: SchemaContext, lexicalTag: string): void {
+  const namespaces = { ...inherited.namespaces };
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "@_xmlns") namespaces[""] = String(value);
+    else if (key.startsWith("@_xmlns:")) namespaces[key.slice(8)] = String(value);
+  }
+  if (expandedNamespace(lexicalTag, namespaces, false) !== XSD_NAMESPACE) throw new Error(`Expected XSD namespace for ${lexicalTag}`);
+  const context = { ...inherited, namespaces };
+  node[SCHEMA_CONTEXT] = context;
+  for (const field of ["type", "base", "ref"]) {
+    const name = readString(node, `@_${field}`);
+    if (!name) continue;
+    const uri = expandedNamespace(name, namespaces, false);
+    const builtin = BUILTIN_TYPES.has(localName(name));
+    if (field !== "ref" && uri === XSD_NAMESPACE && builtin) continue;
+    if (uri !== context.target) throw new Error(`Unsupported foreign schema reference: ${name}`);
+  }
+  for (const [name, value] of node[ORDERED_CHILDREN] ?? []) {
+    if (name === "#text") continue;
+    if (isRecord(value)) annotateSchema(value, localName(name), { ...context, global: tag === "schema" }, name);
   }
 }

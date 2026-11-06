@@ -8,7 +8,7 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 | 1. Lossy XML round trips | Fixed | Ordered siblings, mixed text/tails, QName and whitespace round-trip regressions. |
 | 3. XSD particle ordering | Fixed | Alternating element/choice/element conformance and scaffolding regression. |
 | 4. Syntax and schema validation | Fixed | Malformed XML, final export, numeric lexical/range checks and unsupported schema regressions. |
-| 5. Namespace validation | Pending | |
+| 5. Namespace validation | Fixed | Namespace URI matching, qualified scaffolds, alternate xsi prefix and unbound-prefix tests. |
 | 6. Durable draft schema binding | Pending | |
 | 7. Edit invariants | Pending | |
 | 8. Resource limits | Pending | |
@@ -33,3 +33,7 @@ The schema parser preserves original child order separately from named lookup. P
 ### Fix 4 — fail closed at parsing and export
 
 Added explicit XML syntax/character/name checks and final-output revalidation. Unsupported XSD features and unresolved element/type references fail compilation. Numeric builtin lexical rules and integer bounds replace JavaScript Number coercion; empty numeric/boolean values are invalid. Documented the deliberately limited XSD contract instead of claiming general conformance.
+
+### Fix 5 — validate namespace identities
+
+Schema compilation resolves QName namespaces and rejects foreign/unbound references. Document analysis compares namespace URIs for elements/attributes and applies schema qualification defaults. Scaffolds carry explicit default bindings; schema-instance references work with any bound prefix. Corrected the bundled subset meta-schema to be a namespace-correct XSD. The supported schema contract remains single-schema: imports/includes are explicitly rejected.
