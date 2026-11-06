@@ -6,7 +6,7 @@ Scope: fixes for the 6 November 2026 architecture review. All implementation com
 | --- | --- | --- |
 | 2. Draft HTML injection | Fixed | Runtime draft shape/depth checks, fresh restored IDs, escaped renderer identifiers; regression tests. |
 | 1. Lossy XML round trips | Fixed | Ordered siblings, mixed text/tails, QName and whitespace round-trip regressions. |
-| 3. XSD particle ordering | Pending | |
+| 3. XSD particle ordering | Fixed | Alternating element/choice/element conformance and scaffolding regression. |
 | 4. Syntax and schema validation | Pending | |
 | 5. Namespace validation | Pending | |
 | 6. Durable draft schema binding | Pending | |
@@ -25,3 +25,7 @@ Draft imports validate tree and metadata shapes before use. Restoring a draft al
 ### Fix 1 — preserve ordered XML content
 
 Replaced object-key serialization with ordered XML emission. Element QNames and text tails survive import, draft storage, and export; formatting does not introduce new text. Unsupported comments/processing instructions are rejected explicitly rather than discarded. The current UI edits leading text; trailing mixed-content text remains preserved in the model. Full tests and typecheck pass.
+
+### Fix 3 — compile particles in declaration order
+
+The schema parser preserves original child order separately from named lookup. Particle compilation consumes that order, so repeated element tags no longer jump across intervening choices or sequences. Tests cover both valid and invalid permutations and generated scaffolding.

@@ -297,3 +297,18 @@ describe("ordered XML round trips", () => {
     expect(() => parseXmlString('<?custom x?><r/>')).toThrow("not supported");
   });
 });
+
+
+describe("XSD particle ordering", () => {
+  const ordered = parseXmlSchema(`<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+    <xs:element name="r"><xs:complexType><xs:sequence>
+      <xs:element name="a" type="xs:string"/>
+      <xs:choice><xs:element name="b" type="xs:string"/><xs:element name="c" type="xs:string"/></xs:choice>
+      <xs:element name="d" type="xs:string"/>
+    </xs:sequence></xs:complexType></xs:element></xs:schema>`);
+  it("accepts the declared order and rejects the grouped permutation", () => {
+    expect(analyzeDocument(parseXmlString('<r><a>1</a><b>2</b><d>3</d></r>').root, ordered).problems).toEqual([]);
+    expect(analyzeDocument(parseXmlString('<r><a>1</a><d>3</d><b>2</b></r>').root, ordered).problems.length).toBeGreaterThan(0);
+    expect(createMinimalDocument(ordered, "r").children.map((node) => node.name)).toEqual(["a", "placeholder", "d"]);
+  });
+});

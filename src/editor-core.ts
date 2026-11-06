@@ -50,7 +50,25 @@ export enum ReplacementMode {
   Migration = "migration",
 }
 
-type XmlRecord = Record<string, unknown>;
+const ORDERED_CHILDREN = Symbol("ordered-schema-children");
+type XmlRecord = Record<string, unknown> & { [ORDERED_CHILDREN]?: [string, unknown][] };
+
+function schemaRecord(entries: unknown): XmlRecord {
+  const result: XmlRecord = {};
+  result[ORDERED_CHILDREN] = [];
+  if (!Array.isArray(entries)) return result;
+  for (const entry of entries) {
+    if (!isRecord(entry)) continue;
+    for (const [name, payload] of Object.entries(entry)) {
+      if (name === ":@") continue;
+      const child = name === "#text" ? payload : Object.assign(schemaRecord(payload), isRecord(entry[":@"]) ? entry[":@"] : {});
+      result[ORDERED_CHILDREN].push([name, child]);
+      if (result[name] === undefined) result[name] = child;
+      else result[name] = arrayify(result[name]).concat([child]);
+    }
+  }
+  return result;
+}
 
 export interface SimpleTypeDefinition {
   kind: ValueTypeKind.Simple;
@@ -239,6 +257,7 @@ const XML_DOC_PARSER = new XMLParser({
 });
 
 const XML_SCHEMA_PARSER = new XMLParser({
+  preserveOrder: true,
   ignoreAttributes: false,
   attributeNamePrefix: "@_",
   parseTagValue: false,
@@ -445,7 +464,7 @@ function parseParticle(node: XmlRecord, registry: Registry): Particle | null {
 
   const items: Particle[] = [];
   const occurs = normalizeOccurs(payloadValue);
-  for (const [childName, childValue] of Object.entries(payloadValue)) {
+  for (const [childName, childValue] of (payloadValue[ORDERED_CHILDREN] ?? Object.entries(payloadValue))) {
     if (childName.startsWith("@_")) {
       continue;
     }
@@ -1073,7 +1092,7 @@ export function parseXmlString(xmlText: string): ParsedXmlDocument {
 }
 
 export function parseXmlSchema(xsdText: string): SchemaModel {
-  const raw = XML_SCHEMA_PARSER.parse(xsdText) as unknown;
+  const raw = schemaRecord(XML_SCHEMA_PARSER.parse(xsdText));
   if (!isRecord(raw)) {
     throw new Error("Expected an XML schema document.");
   }
